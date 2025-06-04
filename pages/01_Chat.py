@@ -36,7 +36,7 @@ if user_input:
         st.markdown(user_input)
 
     with st.spinner("Searching relevant proposal content..."):
-            result = encode_search_rerank(user_input, top_k=5)
+            result = encode_search_rerank(user_input, top_k=5, top_n=5, alpha = 0.75)
 
             if not result.data:
                 full_response = "🤔 I couldn't find anything relevant."
