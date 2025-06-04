@@ -3,7 +3,7 @@ import streamlit as st
 from utils.utils import encode_search_rerank
 
 
-st.page_link("Chat.py", label="💬 Go to Proposal Chat", icon="💬")
+# st.page_link("Chat.py", label="💬 Go to Proposal Chat", icon="💬")
 
 st.title("🔎📄Semantic Search over Engineering Proposals")
 

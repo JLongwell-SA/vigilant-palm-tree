@@ -3,7 +3,16 @@ from utils.utils import encode_search_rerank, client
 
 # Streamlit Page Config
 st.set_page_config(page_title="Proposal Chat", layout="wide")
-st.page_link("pages/01_Search.py", label="🔍Go to Proposal Search", icon="🔎")
+
+with st.sidebar:
+
+    # New Chat button
+    if st.button("🆕 New Chat"):
+        st.session_state.messages = []
+        st.rerun()
+
+    #show previous history of chats
+
 
 st.title("📄💬 Proposal Chatbot")
 
@@ -15,8 +24,6 @@ if "messages" not in st.session_state:
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-
-
 
 # Chat input
 user_input = st.chat_input("Ask something about your engineering proposals...")
@@ -144,4 +151,6 @@ Use the following retrieved information only to answer the user's question:
                     "role": "assistant",
                     "content": full_response.strip()
                 })
+
+                #Save the logs to mongodb
 
