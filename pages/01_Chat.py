@@ -25,10 +25,6 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
 
-st.title("📄💬 Proposal Chatbot")
-
-    #show previous history of chats
-
 # Session state for chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
