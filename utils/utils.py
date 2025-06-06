@@ -8,7 +8,10 @@ import os
 import re
 from docx import Document
 import tiktoken
-
+from docx.oxml.table import CT_Tbl
+from docx.oxml.text.paragraph import CT_P
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 API_KEY = st.secrets["API_KEY"]
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
 # MONGODB_KEY = st.secrets["MONGODB_KEY"]
@@ -143,11 +146,6 @@ def extract_section_chunks(doc, doc_title):
             rows.append(" | ".join(cells))
         return "\n".join(rows)
 
-    # Go through elements (paragraphs and tables) in document order
-    from docx.oxml.table import CT_Tbl
-    from docx.oxml.text.paragraph import CT_P
-    from docx.table import Table
-    from docx.text.paragraph import Paragraph
 
     def iter_block_items(parent):
         for child in parent.element.body.iterchildren():
@@ -163,7 +161,6 @@ def extract_section_chunks(doc, doc_title):
 
             if style_name in ['Heading 1', 'Heading 2']:
                 if not found_first_heading and intro_lines:
-                    # doc_title = doc_title
                     intro_title = f"Intro [{doc_title}]"
                     full_intro = f"{intro_title}\n" + "\n".join(intro_lines).strip()
                     full_intro = new_line_regex(full_intro)
@@ -210,7 +207,7 @@ def extract_section_chunks(doc, doc_title):
             section_chunks.insert(0, intro_chunk)
             all_section_paras.insert(0, intro_paras)
 
-    # print("Num of chunks before splitting big chunks " + str(len(section_chunks)))
+    print("Num of chunks before splitting big chunks " + str(len(section_chunks)))
 
     # Reprocess large chunks by Heading 3–6 if token count > 4096
     new_chunks = []
@@ -225,7 +222,7 @@ def extract_section_chunks(doc, doc_title):
 
     section_chunks = new_chunks
 
-    # print("Num of chunks after splitting big chunks " + str(len(section_chunks)))
+    print("Num of chunks after splitting big chunks " + str(len(section_chunks)))
 
     # Merge small chunks (<= 256 tokens) with prev/next if combined <= 8000
     if section_chunks:
@@ -260,7 +257,7 @@ def extract_section_chunks(doc, doc_title):
             else:
                 unchanged_iterations = 0
 
-    # print("Num of chunks after merging chunks " + str(len(section_chunks)))
+    print("Num of chunks after merging chunks " + str(len(section_chunks)))
 
     # Final pass: Split any chunks over 8000 tokens in half with overlap, repeat until all are under 8000
     overlap_lines = 5  # Number of lines to include in both halves as overlap
@@ -286,6 +283,20 @@ def extract_section_chunks(doc, doc_title):
         section_chunks = updated_chunks
 
     section_chunks = [new_line_regex(chunk) for chunk in section_chunks]
+
+    # remove any duplicates that may exist in chunks
+    def deduplicate_within_chunk(chunk):
+        seen = set()
+        deduped_lines = []
+        for line in chunk.split('\n'):
+            line_stripped = line.strip()
+            if line_stripped and line_stripped not in seen:
+                seen.add(line_stripped)
+                deduped_lines.append(line_stripped)
+        return '\n'.join(deduped_lines)
+
+    # Apply to all chunks
+    section_chunks = [deduplicate_within_chunk(chunk) for chunk in section_chunks]
 
     return section_chunks
 
