@@ -1,6 +1,7 @@
 import streamlit as st
 from openai import OpenAI
-from pinecone import Pinecone
+from pinecone import Pinecone, ServerlessSpec
+from pinecone.grpc import PineconeGRPC as Pinecone
 import streamlit_authenticator as stauth
 from pymongo import MongoClient
 from pinecone_text.sparse import BM25Encoder
@@ -26,11 +27,25 @@ PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
 # Initialize OpenAI and Pinecone clients
 client = OpenAI(api_key=API_KEY)
 pc = Pinecone(api_key=PINECONE_API_KEY)
+spec = ServerlessSpec(cloud="aws", region="us-east-1")
 index_name = "hybrid-index"
 hybrid_index = pc.Index(index_name)
 bm25 = BM25Encoder()
 bm25.load(f"bm25_params.json")
 
+if not pc.has_index(index_name):
+    pc.create_index(
+        name=index_name,
+        vector_type="dense",
+        dimension=3072,
+        metric="dotproduct",
+        spec=ServerlessSpec(
+            cloud="aws",
+            region="us-east-1"
+        )
+    )
+
+index = pc.Index(index_name)
 
 def hybrid_score_norm(dense, sparse, alpha: float):
     """Hybrid score using a convex combination
@@ -309,6 +324,77 @@ def scrape_rfp(uploaded_file):
     for i, chunk in enumerate(chunks, 1):
         print(f"\n--- Section {i} ---\n{chunk}\n")
 
+    list_of_dicts = []
+    token_lengths = [count_tokens(chunk) for chunk in chunks]
 
-    # Optional: store content for downstream RAG processing
-    # st.session_state["uploaded_doc_text"] = content
+    if token_lengths:
+        max_index = token_lengths.index(max(token_lengths))
+        largest_chunk = chunks[max_index]
+        largest_tokens = token_lengths[max_index]
+    else:
+        largest_chunk = ""
+        largest_tokens = 0
+
+    list_of_dicts.append({
+        "filename": doc_title,
+        "chunks": chunks,
+        "token_lengths": token_lengths,
+        "largest": {
+            "tokens": largest_tokens,
+            "text": largest_chunk
+        }
+    })
+
+    output = list_of_dicts
+
+    # Save to JSON
+    import json
+    filepath = "chunked_docx.json"
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(output, f, indent=4, ensure_ascii=False)
+    
+    from pinecone_text.sparse import BM25Encoder
+    # bm25 = BM25Encoder.default() # if we don't have to fit/refit then use this default from msmarco
+    # bm25.load("bm25_params.json") can also load from the params we've made and saved locally previously
+
+    bm25 = BM25Encoder()
+    bm25.load("bm25_params.json")
+
+    import json
+    with open(r"chunked_docx.json", "r", encoding='utf-8') as f:
+        data = json.load(f)
+    
+    from tqdm import tqdm
+    
+    for i, doc in tqdm(enumerate(data)):
+        #create embeddings from openai for the chunks in this document
+        response = client.embeddings.create(
+            input=doc["chunks"],
+            model="text-embedding-3-large"
+        )
+
+        doc_sparse_vectors = bm25.encode_documents(doc["chunks"])
+
+        # print(doc_sparse_vector)
+
+        #create a list of dicts with embeddings and metadata for the document
+        embeddings = [
+                {
+                    "id": doc["filename"] +"_"+str(j),
+                    "values": e.embedding,
+                    "sparse_values": {
+                    "indices": doc_sparse_vectors[j]["indices"],
+                    "values": doc_sparse_vectors[j]["values"]
+                        },
+                    "metadata": {"filename": doc["filename"], "chunk": doc["chunks"][j]}
+                    
+                }
+                for j, e in enumerate(response.data)
+            ]
+        
+
+        # #upsert the list of dicts into the pinecone db
+        index.upsert(vectors=embeddings, namespace=doc_title+"-embeddings")
+        # Optional: store content for downstream RAG processing
+        # st.session_state["uploaded_doc_text"] = content
+    return
