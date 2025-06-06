@@ -43,7 +43,7 @@ def hybrid_score_norm(dense, sparse, alpha: float):
     }
     
     return [v * alpha for v in dense], hs
-
+# improve the pipeline with a re-ranker cutoff value/token limit to the amount of chunks we use for context in the final decoder
 def encode_search_rerank(user_query, top_k=20, top_n=40, alpha=0.75):
     # Embed the query using OpenAI
 

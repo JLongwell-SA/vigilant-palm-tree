@@ -4,13 +4,12 @@ from utils.utils import encode_search_rerank, client
 # Streamlit Page Config
 st.set_page_config(page_title="Proposal Chat", layout="wide")
 
+
 with st.sidebar:
     # New Chat button
     if st.button("🆕 New Chat"):
         st.session_state.messages = []
         st.rerun()
-
-    #show previous history of chats
 
 st.title("📄💬 Proposal Chatbot")
 
@@ -19,27 +18,47 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # Display chat messages
-for msg in st.session_state.messages:
+for msg_idx, msg in enumerate(st.session_state.messages):
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         
         # Display context for assistant messages
         if msg["role"] == "assistant" and "context" in msg:
-            with st.expander("📄 View Retrieved Context Chunks"):
-                for i, match in enumerate(msg["context"]):
-                    doc = match['document']
-                    doc_id = doc['id']
-                    metadata = doc.get('metadata', {})
-
-                    chunk_no = doc_id.split("_")[-1]
-                    og_document_title = "_".join(doc_id.split("_")[:-1])
-                    chunk_text = metadata.get("chunk", "[No chunk text available]")
-
-                    st.markdown(f"#### 📘 Result {i+1}")
-                    st.markdown(f"- **Score:** `{match['score']:.4f}`")
-                    st.markdown(f"- **Document:** `{og_document_title}`")
-                    st.markdown(f"- **Chunk #** `{chunk_no}`")
-                    st.markdown(f"```markdown\n{chunk_text.strip()}\n```")
+            # Use a unique key for each expander to prevent interference, havent used this yet
+            expander_key = f"context_expander_{msg_idx}"
+            
+            with st.expander("📄 View Retrieved Context Chunks", expanded=False):
+                
+                context_container = st.container()
+                
+                with context_container:
+                    for i, match in enumerate(msg["context"]):
+                        doc = match['document']
+                        doc_id = doc['id']
+                        metadata = doc.get('metadata', {})
+                        
+                        chunk_no = doc_id.split("_")[-1]
+                        og_document_title = "_".join(doc_id.split("_")[:-1])
+                        chunk_text = metadata.get("chunk", "[No chunk text available]")
+                        
+                        # Use columns to better organize the content and reduce height
+                        col1, col2 = st.columns([1, 3])
+                        
+                        with col1:
+                            st.markdown(f"**📘 Result {i+1}**")
+                            st.markdown(f"Score: `{match['score']:.4f}`")
+                            st.markdown(f"Doc: `{og_document_title}`")
+                            st.markdown(f"Chunk: `{chunk_no}`")
+                        
+                        with col2:
+                            
+                            with st.container():
+                                st.markdown("**Content:**")
+                                st.markdown(chunk_text)
+                        
+                        # Add a subtle divider
+                        if i < len(msg["context"]) - 1:
+                            st.divider()
 
 # Chat input
 user_input = st.chat_input("Ask something about your engineering proposals...")
@@ -146,21 +165,34 @@ Use the following retrieved information only to answer the user's question:
                 placeholder.markdown(full_response)
 
                 # Add collapsible context display for current response
-                with st.expander("📄 View Retrieved Context Chunks"):
-                    for i, match in enumerate(result.data):
-                        doc = match['document']
-                        doc_id = doc['id']
-                        metadata = doc.get('metadata', {})
+                with st.expander("📄 View Retrieved Context Chunks", expanded=False):
+                    context_container = st.container()
+                    
+                    with context_container:
+                        for i, match in enumerate(result.data):
+                            doc = match['document']
+                            doc_id = doc['id']
+                            metadata = doc.get('metadata', {})
 
-                        chunk_no = doc_id.split("_")[-1]
-                        og_document_title = "_".join(doc_id.split("_")[:-1])
-                        chunk_text = metadata.get("chunk", "[No chunk text available]")
+                            chunk_no = doc_id.split("_")[-1]
+                            og_document_title = "_".join(doc_id.split("_")[:-1])
+                            chunk_text = metadata.get("chunk", "[No chunk text available]")
 
-                        st.markdown(f"#### 📘 Result {i+1}")
-                        st.markdown(f"- **Score:** `{match['score']:.4f}`")
-                        st.markdown(f"- **Document:** `{og_document_title}`")
-                        st.markdown(f"- **Chunk #** `{chunk_no}`")
-                        st.markdown(f"```markdown\n{chunk_text.strip()}\n```")
+                            # Use columns for better layout
+                            col1, col2 = st.columns([1, 3])
+                            
+                            with col1:
+                                st.markdown(f"**📘 Result {i+1}**")
+                                st.markdown(f"Score: `{match['score']:.4f}`")
+                                st.markdown(f"Doc: `{og_document_title}`")
+                                st.markdown(f"Chunk: `{chunk_no}`")
+                            
+                            with col2:
+                                st.markdown("**Content:**")
+                                st.markdown(chunk_text)
+                            
+                            if i < len(result.data) - 1:
+                                st.divider()
 
             # Save to chat history WITH context data
             st.session_state.messages.append({
