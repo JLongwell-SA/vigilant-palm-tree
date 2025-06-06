@@ -1,8 +1,15 @@
 import streamlit as st
-from utils.utils import encode_search_rerank, client
+from utils.utils import encode_search_rerank, scrape_rfp, client
+from docx import Document
 
 # Streamlit Page Config
 st.set_page_config(page_title="Proposal Chat", layout="wide")
+
+uploaded_file = st.file_uploader("Upload a Word document (.docx)", type="docx")
+if uploaded_file is not None:
+
+    # calls function from utils that scrapes RFP -> chunks it -> stores it in its own namespace
+    scrape_rfp(uploaded_file)
 
 with st.sidebar:
 
