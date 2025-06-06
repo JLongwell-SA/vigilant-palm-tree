@@ -65,7 +65,7 @@ def encode_search_rerank(user_query, top_k=20, top_n=40, alpha=0.75):
         include_values=True,
         include_metadata=True
     )
-    print(query_response.matches)
+    # print(query_response.matches)
 
     documents_to_rerank = [
         {
@@ -77,8 +77,10 @@ def encode_search_rerank(user_query, top_k=20, top_n=40, alpha=0.75):
         if "chunk" in match.metadata
     ]
 
+    # setup microsoft azure account and change this to query cohere re-rank api
+
     result = pc.inference.rerank(
-        model="bge-reranker-v2-m3",
+        model="bge-reranker-v2-m3", # hopefully change this to cohere re-rank, currently at 1024 input token max
         query=user_query,
         documents=documents_to_rerank,
         rank_fields=["text"],

@@ -5,14 +5,12 @@ from utils.utils import encode_search_rerank, client
 st.set_page_config(page_title="Proposal Chat", layout="wide")
 
 with st.sidebar:
-
     # New Chat button
     if st.button("🆕 New Chat"):
         st.session_state.messages = []
         st.rerun()
 
     #show previous history of chats
-
 
 st.title("📄💬 Proposal Chatbot")
 
@@ -24,10 +22,27 @@ if "messages" not in st.session_state:
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
+        
+        # Display context for assistant messages
+        if msg["role"] == "assistant" and "context" in msg:
+            with st.expander("📄 View Retrieved Context Chunks"):
+                for i, match in enumerate(msg["context"]):
+                    doc = match['document']
+                    doc_id = doc['id']
+                    metadata = doc.get('metadata', {})
+
+                    chunk_no = doc_id.split("_")[-1]
+                    og_document_title = "_".join(doc_id.split("_")[:-1])
+                    chunk_text = metadata.get("chunk", "[No chunk text available]")
+
+                    st.markdown(f"#### 📘 Result {i+1}")
+                    st.markdown(f"- **Score:** `{match['score']:.4f}`")
+                    st.markdown(f"- **Document:** `{og_document_title}`")
+                    st.markdown(f"- **Chunk #** `{chunk_no}`")
+                    st.markdown(f"```markdown\n{chunk_text.strip()}\n```")
 
 # Chat input
 user_input = st.chat_input("Ask something about your engineering proposals...")
-
 
 if user_input:
     # Save user message
@@ -36,12 +51,17 @@ if user_input:
         st.markdown(user_input)
 
     with st.spinner("Searching relevant proposal content..."):
-            result = encode_search_rerank(user_input, top_k=5, top_n=5, alpha = 0.75)
+        result = encode_search_rerank(user_input, top_k=5, top_n=5, alpha=0.75)
 
-            if not result.data:
-                full_response = "🤔 I couldn't find anything relevant."
-            else:
-                prompt = '''You are an advanced AI assistant specializing in retrieving and synthesizing information from historical engineering proposals. Your primary function is to act as a RAG (Retrieval-Augmented Generation) question-answering bot, specifically operating over a corpus of past engineering proposals that were submitted by Smith + Andersen Engineering Consultants in response to Requests for Proposals (RFPs) from various companys and entities.
+        if not result.data:
+            full_response = "🤔 I couldn't find anything relevant."
+            # Save to chat history without context
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": full_response
+            })
+        else:
+            prompt ='''You are an advanced AI assistant specializing in retrieving and synthesizing information from historical engineering proposals. Your primary function is to act as a RAG (Retrieval-Augmented Generation) question-answering bot, specifically operating over a corpus of past engineering proposals that were submitted by Smith + Andersen Engineering Consultants in response to Requests for Proposals (RFPs) from various companys and entities.
 
 ### Core Mission:
 Accurately and comprehensively answer user questions by first retrieving relevant sections from the provided historical engineering proposals, and then synthesizing that information into clear, concise, and direct answers.
@@ -81,55 +101,51 @@ Use the following retrieved information only to answer the user's question:
 ## <CONTEXT>
 
 '''
-                for i, match in enumerate(result.data):
-                    prompt += f"### Result {i+1} 📘 \n"
-                    prompt += f"**Score:** `{match['score']:.4f}`\n"
-                    doc = match['document']
-                    doc_id = doc['id']
-                    metadata = doc.get('metadata', {})
+            for i, match in enumerate(result.data):
+                prompt += f"### Result {i+1} 📘 \n"
+                prompt += f"**Score:** `{match['score']:.4f}`\n"
+                doc = match['document']
+                doc_id = doc['id']
+                metadata = doc.get('metadata', {})
 
-                    chunk_no = doc_id.split("_")[-1]
-                    og_document_title = "_".join(doc_id.split("_")[:-1])
-                    chunk_text = metadata.get("chunk", "[No chunk text available]")
+                chunk_no = doc_id.split("_")[-1]
+                og_document_title = "_".join(doc_id.split("_")[:-1])
+                chunk_text = metadata.get("chunk", "[No chunk text available]")
 
-                    prompt += f"**Original Document Title:** `{og_document_title}`\n"
-                    prompt += f"**Chunk Number:** `{chunk_no}`\n"
-                    prompt += f"**Content:** {chunk_text}\n"
-                    prompt += f"-------------------------------------\n"
-                
-                prompt += f"## </CONTEXT>\n\n## <User Query>\n"
+                prompt += f"**Original Document Title:** `{og_document_title}`\n"
+                prompt += f"**Chunk Number:** `{chunk_no}`\n"
+                prompt += f"**Content:** {chunk_text}\n"
+                prompt += f"-------------------------------------\n"
+            
+            prompt += f"## </CONTEXT>\n\n## <User Query>\n"
 
-                
-                response = client.chat.completions.create(
-                    model="gpt-4.1-2025-04-14",
-                    messages=[
-                        {"role": "system",
-                         "content": prompt
-                        },
-                        {"role": "user",
-                         "content": user_input + "\n</User Query>\n"
-                        }    
-                    ],
-                    temperature=1,
-                    max_tokens=8192,
-                    top_p=1,
-                    stream=True
-                )
+            response = client.chat.completions.create(
+                model="gpt-4.1-2025-04-14",
+                messages=[
+                    {"role": "system",
+                     "content": prompt
+                    },
+                    {"role": "user",
+                     "content": user_input + "\n</User Query>\n"
+                    }    
+                ],
+                temperature=1,
+                max_tokens=8192,
+                top_p=1,
+                stream=True
+            )
 
-                
-                # Stream assistant reply
-                full_response = ""
-                with st.chat_message("assistant"):
-                    placeholder = st.empty()
-                    for chunk in response:
-                        delta = chunk.choices[0].delta.content or ""
-                        full_response += delta
-                        placeholder.markdown(f"{full_response}▌")
-                    placeholder.markdown(full_response)
+            # Stream assistant reply
+            full_response = ""
+            with st.chat_message("assistant"):
+                placeholder = st.empty()
+                for chunk in response:
+                    delta = chunk.choices[0].delta.content or ""
+                    full_response += delta
+                    placeholder.markdown(f"{full_response}▌")
+                placeholder.markdown(full_response)
 
-                
-
-                # Add collapsible context display
+                # Add collapsible context display for current response
                 with st.expander("📄 View Retrieved Context Chunks"):
                     for i, match in enumerate(result.data):
                         doc = match['document']
@@ -146,11 +162,9 @@ Use the following retrieved information only to answer the user's question:
                         st.markdown(f"- **Chunk #** `{chunk_no}`")
                         st.markdown(f"```markdown\n{chunk_text.strip()}\n```")
 
-                # Save to chat history
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": full_response.strip()
-                })
-
-                #Save the logs to mongodb
-
+            # Save to chat history WITH context data
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": full_response.strip(),
+                "context": result.data  # Store the context data
+            })

@@ -5,7 +5,7 @@ from utils.utils import encode_search_rerank
 
 # st.page_link("Chat.py", label="💬 Go to Proposal Chat", icon="💬")
 
-st.title("🔎📄Semantic Search over Engineering Proposals")
+st.title("🔎📄Hybrid Search over Engineering Proposals")
 
 # --- Init session state ---
 if "search_query" not in st.session_state:
