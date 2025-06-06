@@ -1,9 +1,23 @@
 import streamlit as st
-from utils.utils import encode_search_rerank, client
+from utils.utils import encode_search_rerank, scrape_rfp, client
+from docx import Document
 
 # Streamlit Page Config
 st.set_page_config(page_title="Proposal Chat", layout="wide")
 
+
+st.title("📄💬 Proposal Chatbot")
+
+st.write("Please upload the RFP you need assistance with. Be sure to first convert the RFP from PDF to Word using Bluebeam.")
+with st.expander("PDF to Word conversion instructions"):
+        st.write("Step 1: Open your RFP using Bluebeam")
+        st.write("Step 2: Click file > Export > Word Document > Entire Document")
+        st.write("Step 3: Drag and drop the exported Word doc below")
+uploaded_file = st.file_uploader(" 📄 Word Document Uploader (.docx)", type="docx")
+if uploaded_file is not None:
+
+    # calls function from utils that scrapes RFP -> chunks it -> stores it in its own namespace
+    scrape_rfp(uploaded_file)
 
 with st.sidebar:
     # New Chat button
@@ -12,6 +26,8 @@ with st.sidebar:
         st.rerun()
 
 st.title("📄💬 Proposal Chatbot")
+
+    #show previous history of chats
 
 # Session state for chat history
 if "messages" not in st.session_state:
