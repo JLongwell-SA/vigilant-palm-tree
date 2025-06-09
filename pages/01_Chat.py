@@ -29,9 +29,11 @@ if (uploaded_file is not None) and (st.session_state.summary == "") :
     # calls function from utils that scrapes RFP -> chunks it -> stores it in its own namespace, returning name of the uploaded doc to use as namespace.
         st.session_state.doc_title = scrape_rfp(uploaded_file)
         print(st.session_state.doc_title)
+        st.session_state.namespace = st.session_state.doc_title + "-embeddings"
     with st.spinner("Summarizing..."):
         st.session_state.summary = summarize_rfp(uploaded_file)
         print(st.session_state.summary)
+
 with st.sidebar:
     # New Chat button
     if st.button("🆕 New Chat"):
@@ -94,8 +96,9 @@ if user_input:
         st.markdown(user_input)
 
     with st.spinner("Searching relevant proposal content..."):
-        
+
         result = encode_search_rerank(user_input, st.session_state.summary, st.session_state.namespace, top_k=5, top_n=5, alpha=0.75)
+        print("This is the len of the result", len(result))
         st.session_state.len_res = len(result)
         if not result[0].data:
             full_response = "🤔 I couldn't find anything relevant."
@@ -144,7 +147,7 @@ if user_input:
                     rfp_prompt += f"**Content:** {chunk_text}\n"
                     rfp_prompt += f"-------------------------------------\n"
 
-                final_prompt = DOC_PROMPT + "## <SUMMARY>\n" + st.session_state.summary + "\n## </SUMMARY>\n\n## <RFP>" + rfp_prompt + "\n## </RFP>\n\n## <PROPOSAL>" + proposals_prompt +  "\n## </PROPOSAL>\n\n## </CONTEXT>\n\n## <User Query>\n" 
+                final_prompt = DOC_PROMPT + "## <SUMMARY>\n" + st.session_state.summary + "\n## </SUMMARY>\n\n## <RFP>\n" + rfp_prompt + "\n## </RFP>\n\n## <PROPOSAL>\n" + proposals_prompt +  "\n## </PROPOSAL>\n\n## </CONTEXT>\n\n## <User Query>\n" 
 
 
             print("This is the final prompt", final_prompt)
@@ -174,6 +177,8 @@ if user_input:
                     full_response += delta
                     placeholder.markdown(f"{full_response}▌")
                 placeholder.markdown(full_response)
+
+                ## Look for $ post process and make them good
                 
                 # Change these to redirect to another page? or wipe whats there or something
                 # Add collapsible context display for current response. 

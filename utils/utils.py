@@ -13,8 +13,6 @@ from docx.oxml.table import CT_Tbl
 from docx.oxml.text.paragraph import CT_P
 from docx.table import Table
 from docx.text.paragraph import Paragraph
-import json
-from tqdm import tqdm
 import time
 from utils.prompts import SUM_PROMPT
 
@@ -119,7 +117,8 @@ def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, al
         parameters={"truncate": "END"}
     )
 
-
+    print("This is the summary", summary)
+    print("This is the name_space", name_space)
     if (summary != "") and (name_space != ""):
 
         rfp_response = hybrid_index.query(
@@ -158,8 +157,6 @@ def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, al
     
     return [result]
 
-def summarize_rfp():
-    return ""
 
 def count_tokens(text, model="text-embedding-3-large"):
     enc = tiktoken.encoding_for_model(model)
@@ -420,23 +417,23 @@ def scrape_rfp(uploaded_file):
                 }
                 for j, e in enumerate(response.data)
             ]
-    # index.delete(delete_all=True, namespace=doc_title+"-embeddings")
+    index.delete(delete_all=True, namespace=doc_title+"-embeddings")
 
-    # while True:
-    #     stats = index.describe_index_stats()
-    #     ns_stats = stats['namespaces'].get(doc_title+"-embeddings", {})
-    #     vector_count = ns_stats.get('vector_count', 0)
+    while True:
+        stats = index.describe_index_stats()
+        ns_stats = stats['namespaces'].get(doc_title+"-embeddings", {})
+        vector_count = ns_stats.get('vector_count', 0)
 
-    #     if vector_count == 0:
-    #         print("Deletion complete.")
-    #         break
+        if vector_count == 0:
+            print("Deletion complete.")
+            break
 
-    #     print(f"Waiting for deletion... {vector_count} vectors remain.")
-    #     time.sleep(2)
+        print(f"Waiting for deletion... {vector_count} vectors remain.")
+        time.sleep(2)
 
     index.upsert(vectors=embeddings, namespace=doc_title+"-embeddings")
 
-    return doc_title+"-embeddings"
+    return doc_title
 
 def extract_paragraphs_and_tables(doc):
     elements = []
