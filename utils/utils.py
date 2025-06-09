@@ -419,3 +419,94 @@ def scrape_rfp(uploaded_file):
     #save this for logging purposes to mongo once we get it
     #list_of_dicts
     return doc_title+"-embeddings"
+
+def extract_paragraphs_and_tables(doc):
+    elements = []
+
+    for block in doc.element.body:
+        if block.tag.endswith('}p'):
+            paragraph = Paragraph(block, doc)
+            text = paragraph.text.strip()
+            if text:
+                elements.append(text)
+        elif block.tag.endswith('}tbl'):
+            table = Table(block, doc)
+            table_data = []
+
+            for row in table.rows:
+                row_data = [cell.text.strip() for cell in row.cells]
+                table_data.append(row_data)
+
+            elements.append(table_data)
+
+    return elements
+
+def format_table_as_markdown(table_data):
+    if not table_data:
+        return ""
+
+    header = table_data[0]
+    rows = table_data[1:]
+
+    # Build the header line
+    md = "| " + " | ".join(header) + " |\n"
+    # Build the separator line
+    md += "| " + " | ".join("---" for _ in header) + " |\n"
+    # Build the data rows
+    for row in rows:
+        md += "| " + " | ".join(row) + " |\n"
+
+    return md
+
+def summarize_rfp(uploaded_file):
+    doc = Document(uploaded_file)
+    
+    # Extract content
+    elements = extract_paragraphs_and_tables(doc)
+
+    # Convert everything to Markdown-formatted text
+    final_text = ""
+    for el in elements:
+        if isinstance(el, str):
+            final_text += el + "\n\n"
+        else:
+            final_text += format_table_as_markdown(el) + "\n\n"
+
+
+    # make an API call where we pass in the doc + a query requestion for a summary
+    response = client.responses.create(
+        model ="gpt-4.1-2025-04-14",
+        instructions= ''' 
+        You are an expert in summarizing RFP documents that Smith and Andersen Engineering Consulting want to place bids for.
+
+        ### Core Mission:
+        Accurately and comprehensively extract information from the incoming RFP document so that a person filling out the bid knows all of the important details regarding the RFP.
+        This includes content such as
+        - The statement of work
+        - What the project is about overall
+        - What vertical the project falls under: recreational centers, hospitals, coporate buildings, etc.
+        - What is the timeline to complete the project?
+        - What is the sqaure footage of the project
+        If any of the sections mentioned in this list is not present in the document then do you do not need to include that section. Do not under any circumstances fabricate information.
+        This is a non-exhaustive list of important content. Your summary must include as much relevant content as possible.
+
+        ### Strictly adhere to the provided context:
+        Your summary must be grounded solely in the information found within the RFP. Do not introduce external knowledge, make assumptions, or extrapolate beyond the text.
+
+        ### Quoting (selectively):
+        Use direct quotes sparingly and only when the exact phrasing is crucial for accuracy or clarity. When quoting, enclose the quoted text in quotation marks.
+
+        ### Avoid conversational filler:
+        Do not use phrases like "As an AI language model...", "I can help you with that...", or other non-informative greetings/closings. Get straight to the point.
+
+        ### Maintain Professional Tone:
+        Your responses should be professional, objective, and authoritative.
+        ''',
+        input="Here is the RFP document " + final_text,
+        temperature=1
+    )
+
+    # Get the output text
+    output_text = response.output_text
+
+    return output_text

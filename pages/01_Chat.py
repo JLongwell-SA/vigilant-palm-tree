@@ -175,7 +175,7 @@ if user_input:
                     context_container = st.container()
                     
                     with context_container:
-                        for i, match in enumerate(result.data):
+                        for i, match in enumerate(result[0].data):
                             doc = match['document']
                             doc_id = doc['id']
                             metadata = doc.get('metadata', {})
@@ -197,12 +197,12 @@ if user_input:
                                 st.markdown("**Content:**")
                                 st.markdown(chunk_text)
                             
-                            if i < len(result.data) - 1:
+                            if i < len(result[0].data) - 1:
                                 st.divider()
 
             # Save to chat history WITH context data
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": full_response.strip(),
-                "context": result.data  # Store the context data
+                "context": result[0].data  # Store the context data
             })
