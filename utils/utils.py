@@ -9,6 +9,12 @@ import os
 import re
 from docx import Document
 import tiktoken
+from docx.oxml.table import CT_Tbl
+from docx.oxml.text.paragraph import CT_P
+from docx.table import Table
+from docx.text.paragraph import Paragraph
+import json
+from tqdm import tqdm
 
 API_KEY = st.secrets["API_KEY"]
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
@@ -62,7 +68,7 @@ def hybrid_score_norm(dense, sparse, alpha: float):
     }
     
     return [v * alpha for v in dense], hs
-
+# improve the pipeline with a re-ranker cutoff value/token limit to the amount of chunks we use for context in the final decoder
 def encode_search_rerank(user_query, top_k=20, top_n=40, alpha=0.75):
     # Embed the query using OpenAI
 
@@ -84,6 +90,10 @@ def encode_search_rerank(user_query, top_k=20, top_n=40, alpha=0.75):
         include_values=True,
         include_metadata=True
     )
+
+    
+
+
     # print(query_response.matches)
 
     documents_to_rerank = [
@@ -96,8 +106,10 @@ def encode_search_rerank(user_query, top_k=20, top_n=40, alpha=0.75):
         if "chunk" in match.metadata
     ]
 
+    # setup microsoft azure account and change this to query cohere re-rank api
+
     result = pc.inference.rerank(
-        model="bge-reranker-v2-m3",
+        model="bge-reranker-v2-m3", # hopefully change this to cohere re-rank, currently at 1024 input token max
         query=user_query,
         documents=documents_to_rerank,
         rank_fields=["text"],
@@ -156,11 +168,6 @@ def extract_section_chunks(doc, doc_title):
             rows.append(" | ".join(cells))
         return "\n".join(rows)
 
-    # Go through elements (paragraphs and tables) in document order
-    from docx.oxml.table import CT_Tbl
-    from docx.oxml.text.paragraph import CT_P
-    from docx.table import Table
-    from docx.text.paragraph import Paragraph
 
     def iter_block_items(parent):
         for child in parent.element.body.iterchildren():
@@ -176,7 +183,6 @@ def extract_section_chunks(doc, doc_title):
 
             if style_name in ['Heading 1', 'Heading 2']:
                 if not found_first_heading and intro_lines:
-                    # doc_title = doc_title
                     intro_title = f"Intro [{doc_title}]"
                     full_intro = f"{intro_title}\n" + "\n".join(intro_lines).strip()
                     full_intro = new_line_regex(full_intro)
@@ -223,7 +229,7 @@ def extract_section_chunks(doc, doc_title):
             section_chunks.insert(0, intro_chunk)
             all_section_paras.insert(0, intro_paras)
 
-    # print("Num of chunks before splitting big chunks " + str(len(section_chunks)))
+    print("Num of chunks before splitting big chunks " + str(len(section_chunks)))
 
     # Reprocess large chunks by Heading 3–6 if token count > 4096
     new_chunks = []
@@ -238,7 +244,7 @@ def extract_section_chunks(doc, doc_title):
 
     section_chunks = new_chunks
 
-    # print("Num of chunks after splitting big chunks " + str(len(section_chunks)))
+    print("Num of chunks after splitting big chunks " + str(len(section_chunks)))
 
     # Merge small chunks (<= 256 tokens) with prev/next if combined <= 8000
     if section_chunks:
@@ -253,12 +259,12 @@ def extract_section_chunks(doc, doc_title):
                 if current_tokens <= 256:
                     merged = False
                     prev_tokens = count_tokens(section_chunks[i - 1])
-                    if prev_tokens + current_tokens <= 8000:
+                    if prev_tokens + current_tokens <= 8192:
                         section_chunks[i - 1] += "\n\n" + current_chunk
                         merged = True
 
                     next_tokens = count_tokens(section_chunks[i + 1])
-                    if next_tokens + current_tokens <= 8000:
+                    if next_tokens + current_tokens <= 8192:
                         section_chunks[i + 1] = current_chunk + "\n\n" + section_chunks[i + 1]
                         merged = True
 
@@ -273,15 +279,15 @@ def extract_section_chunks(doc, doc_title):
             else:
                 unchanged_iterations = 0
 
-    # print("Num of chunks after merging chunks " + str(len(section_chunks)))
+    print("Num of chunks after merging chunks " + str(len(section_chunks)))
 
     # Final pass: Split any chunks over 8000 tokens in half with overlap, repeat until all are under 8000
     overlap_lines = 5  # Number of lines to include in both halves as overlap
 
-    while any(count_tokens(chunk) > 8000 for chunk in section_chunks):
+    while any(count_tokens(chunk) > 8192 for chunk in section_chunks):
         updated_chunks = []
         for chunk in section_chunks:
-            if count_tokens(chunk) > 8000:
+            if count_tokens(chunk) > 8192:
                 lines = chunk.split("\n")
                 midpoint = len(lines) // 2
 
@@ -299,6 +305,20 @@ def extract_section_chunks(doc, doc_title):
         section_chunks = updated_chunks
 
     section_chunks = [new_line_regex(chunk) for chunk in section_chunks]
+
+    # remove any duplicates that may exist in chunks
+    def deduplicate_within_chunk(chunk):
+        seen = set()
+        deduped_lines = []
+        for line in chunk.split('\n'):
+            line_stripped = line.strip()
+            if line_stripped and line_stripped not in seen:
+                seen.add(line_stripped)
+                deduped_lines.append(line_stripped)
+        return '\n'.join(deduped_lines)
+
+    # Apply to all chunks
+    section_chunks = [deduplicate_within_chunk(chunk) for chunk in section_chunks]
 
     return section_chunks
 
@@ -332,56 +352,33 @@ def scrape_rfp(uploaded_file):
         }
     })
 
-    output = list_of_dicts
 
-    # Save to JSON
-    import json
-    filepath = "chunked_docx.json"
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(output, f, indent=4, ensure_ascii=False)
-    
-    from pinecone_text.sparse import BM25Encoder
-    # bm25 = BM25Encoder.default() # if we don't have to fit/refit then use this default from msmarco
-    # bm25.load("bm25_params.json") can also load from the params we've made and saved locally previously
-
-    bm25 = BM25Encoder()
-    bm25.load("bm25_params.json")
-
-    import json
-    with open(r"chunked_docx.json", "r", encoding='utf-8') as f:
-        data = json.load(f)
-    
-    from tqdm import tqdm
-    
-    for i, doc in tqdm(enumerate(data)):
-        #create embeddings from openai for the chunks in this document
-        response = client.embeddings.create(
-            input=doc["chunks"],
+    ###
+    ### write some retry logic here to avoid rate limit failures
+    ###
+    response = client.embeddings.create(
+            input=chunks,
             model="text-embedding-3-large"
         )
+    
+    doc_sparse_vectors = bm25.encode_documents(chunks)
 
-        doc_sparse_vectors = bm25.encode_documents(doc["chunks"])
-
-        # print(doc_sparse_vector)
-
-        #create a list of dicts with embeddings and metadata for the document
-        embeddings = [
+    embeddings = [
                 {
-                    "id": doc["filename"] +"_"+str(j),
+                    "id": doc_title +"_"+str(j),
                     "values": e.embedding,
                     "sparse_values": {
                     "indices": doc_sparse_vectors[j]["indices"],
                     "values": doc_sparse_vectors[j]["values"]
                         },
-                    "metadata": {"filename": doc["filename"], "chunk": doc["chunks"][j]}
+                    "metadata": {"filename": doc_title, "chunk": chunks[j]}
                     
                 }
                 for j, e in enumerate(response.data)
             ]
-        
+    
+    index.upsert(vectors=embeddings, namespace=doc_title+"-embeddings")
 
-        # #upsert the list of dicts into the pinecone db
-        index.upsert(vectors=embeddings, namespace=doc_title+"-embeddings")
-        # Optional: store content for downstream RAG processing
-        # st.session_state["uploaded_doc_text"] = content
+    #save this for logging purposes to mongo once we get it
+    #list_of_dicts
     return

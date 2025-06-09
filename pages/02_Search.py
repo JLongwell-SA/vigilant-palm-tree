@@ -5,7 +5,7 @@ from utils.utils import encode_search_rerank
 
 # st.page_link("Chat.py", label="💬 Go to Proposal Chat", icon="💬")
 
-st.title("🔎📄Semantic Search over Engineering Proposals")
+st.title("🔎📄Hybrid Search over Engineering Proposals")
 
 # --- Init session state ---
 if "search_query" not in st.session_state:
@@ -39,8 +39,6 @@ if st.session_state.search_results:
         st.success(f"Showing results for: {st.session_state.search_query}")
         
         for i, match in enumerate(st.session_state.search_results.data):
-            st.markdown(f"### Result {i+1} 📘 ")
-            st.markdown(f"**Score:** `{match['score']:.4f}`")
 
             doc = match['document']
             doc_id = doc['id']
@@ -49,8 +47,18 @@ if st.session_state.search_results:
             chunk_no = doc_id.split("_")[-1]
             og_document_title = "_".join(doc_id.split("_")[:-1])
             chunk_text = metadata.get("chunk", "[No chunk text available]")
+             # Use columns for better layout
+            col1, col2 = st.columns([1, 3])
 
-            st.markdown(f"**Original Document Title:** `{og_document_title}`")
-            st.markdown(f"**Chunk Number:** `{chunk_no}`")
-            st.markdown(f"**Content:**\n\n {chunk_text}")
-            st.markdown(f"-------------------------------------")
+            with col1:
+                st.markdown(f"**📘 Result {i+1}**")
+                st.markdown(f"Score: `{match['score']:.4f}`")
+                st.markdown(f"Doc: `{og_document_title}`")
+                st.markdown(f"Chunk: `{chunk_no}`")
+
+            with col2:
+                st.markdown("**Content:**")
+                st.markdown(chunk_text)
+
+            if i < len(st.session_state.search_results.data) - 1:
+                st.divider()
