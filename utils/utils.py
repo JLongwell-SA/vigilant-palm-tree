@@ -435,8 +435,6 @@ def scrape_rfp(uploaded_file):
 
     index.upsert(vectors=embeddings, namespace=doc_title+"-embeddings")
 
-    #save this for logging purposes to mongo once we get it
-    #list_of_dicts
     return doc_title+"-embeddings"
 
 def extract_paragraphs_and_tables(doc):
