@@ -16,6 +16,7 @@ from docx.text.paragraph import Paragraph
 import json
 from tqdm import tqdm
 import time
+from utils.prompts import SUM_PROMPT
 
 API_KEY = st.secrets["API_KEY"]
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
@@ -493,37 +494,19 @@ def summarize_rfp(uploaded_file):
     # make an API call where we pass in the doc + a query requestion for a summary
     response = client.responses.create(
         model ="gpt-4.1-2025-04-14",
-        instructions= ''' 
-        You are an expert in summarizing RFP documents that Smith and Andersen Engineering Consulting want to place bids for.
+        input = [
 
-        ### Core Mission:
-        Accurately and comprehensively extract information from the incoming RFP document so that a person filling out the bid knows all of the important details regarding the RFP.
-        This includes content such as
-        - The statement of work
-        - What the project is about overall
-        - What vertical the project falls under: recreational centers, hospitals, coporate buildings, etc.
-        - What is the timeline to complete the project?
-        - What is the sqaure footage of the project
-        If any of the sections mentioned in this list is not present in the document then do you do not need to include that section. Do not under any circumstances fabricate information.
-        This is a non-exhaustive list of important content. Your summary must include as much relevant content as possible.
-
-        ### Strictly adhere to the provided context:
-        Your summary must be grounded solely in the information found within the RFP. Do not introduce external knowledge, make assumptions, or extrapolate beyond the text.
-
-        ### Quoting (selectively):
-        Use direct quotes sparingly and only when the exact phrasing is crucial for accuracy or clarity. When quoting, enclose the quoted text in quotation marks.
-
-        ### Avoid conversational filler:
-        Do not use phrases like "As an AI language model...", "I can help you with that...", or other non-informative greetings/closings. Get straight to the point.
-
-        ### Maintain Professional Tone:
-        Your responses should be professional, objective, and authoritative.
-        ''',
-        input="Here is the RFP document " + final_text,
-        temperature=1
+            {
+                "role": "system",
+                "content": SUM_PROMPT
+            },
+            {
+                "role": "user",
+                "content": "Here is the RFP document " + final_text
+            } 
+        ],
+        temperature=1,
+        top_p=1
     )
 
-    # Get the output text
-    output_text = response.output_text
-
-    return output_text
+    return response.output_text
