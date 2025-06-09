@@ -1,12 +1,21 @@
 import streamlit as st
-from utils.utils import encode_search_rerank, scrape_rfp, client
-from docx import Document
-
+from utils.utils import encode_search_rerank, scrape_rfp, client, summarize_rfp
+from utils.prompts import NO_DOC_PROMPT, DOC_PROMPT
 # Streamlit Page Config
 st.set_page_config(page_title="Proposal Chat", layout="wide")
 
 
 st.title("📄💬 Proposal Chatbot")
+
+# Session state for chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "summary" not in st.session_state:
+    st.session_state.summary = ""
+if "namespace" not in st.session_state:
+    st.session_state.namespace = ""
+if "doc_title" not in st.session_state:
+    st.session_state.doc_title = ""
 
 st.write("Please upload the RFP you need assistance with. Be sure to first convert the RFP from PDF to Word using Bluebeam.")
 with st.expander("PDF to Word conversion instructions"):
@@ -14,20 +23,20 @@ with st.expander("PDF to Word conversion instructions"):
         st.write("Step 2: Click file > Export > Word Document > Entire Document")
         st.write("Step 3: Drag and drop the exported Word doc below")
 uploaded_file = st.file_uploader(" 📄 Word Document Uploader (.docx)", type="docx")
-if uploaded_file is not None:
 
-    # calls function from utils that scrapes RFP -> chunks it -> stores it in its own namespace
-    scrape_rfp(uploaded_file)
+if uploaded_file is not None:
+    # calls function from utils that scrapes RFP -> chunks it -> stores it in its own namespace, returning name of the uploaded doc to use as namespace
+    st.session_state.doc_title = scrape_rfp(uploaded_file)
+    st.session_state.summary = summarize_rfp(uploaded_file)
 
 with st.sidebar:
     # New Chat button
     if st.button("🆕 New Chat"):
         st.session_state.messages = []
+        st.session_state.summary = ""
+        st.session_state.namespace = ""
+        st.session_state.doc_title = ""
         st.rerun()
-
-# Session state for chat history
-if "messages" not in st.session_state:
-    st.session_state.messages = []
 
 # Display chat messages
 for msg_idx, msg in enumerate(st.session_state.messages):
@@ -82,9 +91,9 @@ if user_input:
         st.markdown(user_input)
 
     with st.spinner("Searching relevant proposal content..."):
-        result = encode_search_rerank(user_input, top_k=5, top_n=5, alpha=0.75)
-
-        if not result.data:
+        result = encode_search_rerank(user_input, st.session_state.summary, st.session_state.namespace, top_k=5, top_n=5, alpha=0.75)
+        st.session_state.len_res = len(result)
+        if not result[0].data:
             full_response = "🤔 I couldn't find anything relevant."
             # Save to chat history without context
             st.session_state.messages.append({
@@ -92,49 +101,13 @@ if user_input:
                 "content": full_response
             })
         else:
-            prompt ='''You are an advanced AI assistant specializing in retrieving and synthesizing information from historical engineering proposals. Your primary function is to act as a RAG (Retrieval-Augmented Generation) question-answering bot, specifically operating over a corpus of past engineering proposals that were submitted by Smith + Andersen Engineering Consultants in response to Requests for Proposals (RFPs) from various companys and entities.
-
-### Core Mission:
-Accurately and comprehensively answer user questions by first retrieving relevant sections from the provided historical engineering proposals, and then synthesizing that information into clear, concise, and direct answers.
-
-### Constraints & Guidelines:
-
-## Strictly adhere to the provided context:
-Your answers must be grounded solely in the information found within the retrieved engineering proposal documents. Do not introduce external knowledge, make assumptions, or extrapolate beyond the text.
-## RAG Process Emulation:
-When a user asks a question, mentally simulate a retrieval step. If you were truly a RAG system, you would query a vector database or similar index to find the most semantically relevant chunks of text from the proposal corpus.
-For this simulation, assume that the most relevant paragraphs/sections from the proposals will be provided to you as [CONTEXT] in each user query. Your task begins after this retrieval step.
-Your output should clearly demonstrate that you are drawing directly from this context.
-
-## Answer Format:
-# Direct Answer First:
-Provide the most direct and concise answer to the user's question upfront.
-# Elaboration (if necessary):
-If the direct answer requires further explanation or supporting details, provide them in subsequent sentences or a short paragraph.
-# Quoting (selectively):
-Use direct quotes sparingly and only when the exact phrasing is crucial for accuracy or clarity. When quoting, enclose the quoted text in quotation marks.
-# Avoid conversational filler:
-Do not use phrases like "As an AI language model...", "I can help you with that...", or other non-informative greetings/closings. Get straight to the point.
-# Handling Ambiguity/Lack of Information:
-If the answer to the question cannot be found within the provided [CONTEXT], state explicitly and politely: "I apologize, but the provided context does not contain the information needed to answer this question." Do not guess or fabricate information.
-If a question is vague or requires clarification, respond by stating what information is missing (e.g., "Could you please specify which project or client you are referring to?").
-# Focus on Engineering & Proposal Specifics:
-Pay close attention to technical specifications, proposed methodologies, project timelines, deliverables, team structures, cost breakdowns (if available in context), unique selling points, and responses to specific RFP requirements.
-Understand that these documents are often formal, detailed, and persuasive in nature.
-#Maintain Professional Tone:
-Your responses should be professional, objective, and authoritative.
-# Identify Key Entities:
-Be able to identify and differentiate between Smith + Andersen (the proposer) and the "Client Company" (the requesting entity/customer) within the context.
-# Iterative Refinement (Implicit):
-If a user asks a follow-up question that relies on the same context, assume the context is still relevant or that a refined context would be provided.
-
-Use the following retrieved information only to answer the user's question:
-## <CONTEXT>
-
-'''
-            for i, match in enumerate(result.data):
-                prompt += f"### Result {i+1} 📘 \n"
-                prompt += f"**Score:** `{match['score']:.4f}`\n"
+            final_prompt = f""
+            
+            
+            proposals_prompt = f""
+            for i, match in enumerate(result[0].data):
+                proposals_prompt += f"### Result {i+1} 📘 \n"
+                proposals_prompt += f"**Score:** `{match['score']:.4f}`\n"
                 doc = match['document']
                 doc_id = doc['id']
                 metadata = doc.get('metadata', {})
@@ -143,18 +116,37 @@ Use the following retrieved information only to answer the user's question:
                 og_document_title = "_".join(doc_id.split("_")[:-1])
                 chunk_text = metadata.get("chunk", "[No chunk text available]")
 
-                prompt += f"**Original Document Title:** `{og_document_title}`\n"
-                prompt += f"**Chunk Number:** `{chunk_no}`\n"
-                prompt += f"**Content:** {chunk_text}\n"
-                prompt += f"-------------------------------------\n"
+                proposals_prompt += f"**Original Document Title:** `{og_document_title}`\n"
+                proposals_prompt += f"**Chunk Number:** `{chunk_no}`\n"
+                proposals_prompt += f"**Content:** {chunk_text}\n"
+                proposals_prompt += f"-------------------------------------\n"
             
-            prompt += f"## </CONTEXT>\n\n## <User Query>\n"
+    
+            if st.session_state.len_res == 1:
+                final_prompt = NO_DOC_PROMPT + proposals_prompt + "## </CONTEXT>\n\n## <User Query>\n"
+            else:
+                rfp_prompt = f"**Original Document Title:** `{st.session_state.doc_title}`\n\n"
+                for i, match in enumerate(result[1].data):
+                    rfp_prompt += f"### Result {i+1} 📘 \n"
+                    rfp_prompt += f"**Score:** `{match['score']:.4f}`\n"
+                    metadata = doc.get('metadata', {})
+
+                    chunk_no = doc_id.split("_")[-1]
+                    og_document_title = "_".join(doc_id.split("_")[:-1])
+                    chunk_text = metadata.get("chunk", "[No chunk text available]")
+
+                    rfp_prompt += f"**Chunk Number:** `{chunk_no}`\n"
+                    rfp_prompt += f"**Content:** {chunk_text}\n"
+                    rfp_prompt += f"-------------------------------------\n"
+
+                final_prompt = DOC_PROMPT + "## <SUMMARY>\n" + st.session_state.summary + "\n## </SUMMARY>\n\n## <RFP>" + rfp_prompt + "\n## </RFP>\n\n## <PROPOSAL>" + proposals_prompt +  "\n## </PROPOSAL>\n\n## </CONTEXT>\n\n## <User Query>\n" 
+
 
             response = client.chat.completions.create(
                 model="gpt-4.1-2025-04-14",
                 messages=[
                     {"role": "system",
-                     "content": prompt
+                     "content": final_prompt
                     },
                     {"role": "user",
                      "content": user_input + "\n</User Query>\n"
@@ -175,8 +167,10 @@ Use the following retrieved information only to answer the user's question:
                     full_response += delta
                     placeholder.markdown(f"{full_response}▌")
                 placeholder.markdown(full_response)
-
-                # Add collapsible context display for current response
+                
+                # Change these to redirect to another page? or wipe whats there or something
+                # Add collapsible context display for current response. 
+                # make another of these for the rfp retreived context
                 with st.expander("📄 View Retrieved Context Chunks", expanded=False):
                     context_container = st.container()
                     
