@@ -25,9 +25,10 @@ with st.expander("PDF to Word conversion instructions"):
 uploaded_file = st.file_uploader(" 📄 Word Document Uploader (.docx)", type="docx")
 
 if uploaded_file is not None:
-    # calls function from utils that scrapes RFP -> chunks it -> stores it in its own namespace, returning name of the uploaded doc to use as namespace
-    st.session_state.doc_title = scrape_rfp(uploaded_file)
-    st.session_state.summary = summarize_rfp(uploaded_file)
+    with st.spinner("Procesing your RFP..."):
+    # calls function from utils that scrapes RFP -> chunks it -> stores it in its own namespace, returning name of the uploaded doc to use as namespace.
+        st.session_state.doc_title = scrape_rfp(uploaded_file)
+        st.session_state.summary = summarize_rfp(uploaded_file)
 
 with st.sidebar:
     # New Chat button

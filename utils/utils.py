@@ -15,6 +15,7 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 import json
 from tqdm import tqdm
+import time
 
 API_KEY = st.secrets["API_KEY"]
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
@@ -68,9 +69,11 @@ def hybrid_score_norm(dense, sparse, alpha: float):
     }
     
     return [v * alpha for v in dense], hs
+
 # improve the pipeline with a re-ranker cutoff value/token limit to the amount of chunks we use for context in the final decoder
 def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, alpha=0.75):
     # Embed the query using OpenAI
+    # write some retry logic here incase we get rate limits
 
     embedding_response = client.embeddings.create(
         model="text-embedding-3-large",
@@ -91,8 +94,6 @@ def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, al
         include_metadata=True
     )
 
-
-
     # print(query_response.matches)
 
     documents_to_rerank = [
@@ -106,7 +107,7 @@ def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, al
     ]
 
     # setup microsoft azure account and change this to query cohere re-rank api
-
+    # write some retry logic here incase we get rate limits
     result = pc.inference.rerank(
         model="bge-reranker-v2-m3", # hopefully change this to cohere re-rank, currently at 1024 input token max
         query=user_query,
@@ -140,6 +141,8 @@ def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, al
 
             ]
         
+        # setup microsoft azure account and change this to query cohere re-rank api
+        # write some retry logic here incase we get rate limits
         rfp_result = pc.inference.rerank(
             model="bge-reranker-v2-m3", # hopefully change this to cohere re-rank, currently at 1024 input token max
             query=user_query,
@@ -157,7 +160,7 @@ def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, al
 def summarize_rfp():
     return ""
 
-def count_tokens(text, model="text-embedding-3-small"):
+def count_tokens(text, model="text-embedding-3-large"):
     enc = tiktoken.encoding_for_model(model)
     return len(enc.encode(text))
 
@@ -364,30 +367,33 @@ def scrape_rfp(uploaded_file):
     doc_title = os.path.splitext(uploaded_file.name)[0]
 
     chunks = extract_section_chunks(doc, doc_title)
-    # Print for testing
-    for i, chunk in enumerate(chunks, 1):
-        print(f"\n--- Section {i} ---\n{chunk}\n")
+    # # Print for testing
+    # for i, chunk in enumerate(chunks, 1):
+    #     print(f"\n--- Section {i} ---\n{chunk}\n")
 
-    list_of_dicts = []
-    token_lengths = [count_tokens(chunk) for chunk in chunks]
+    # list_of_dicts = []
+    # token_lengths = [count_tokens(chunk) for chunk in chunks]
 
-    if token_lengths:
-        max_index = token_lengths.index(max(token_lengths))
-        largest_chunk = chunks[max_index]
-        largest_tokens = token_lengths[max_index]
-    else:
-        largest_chunk = ""
-        largest_tokens = 0
+    # if token_lengths:
+    #     max_index = token_lengths.index(max(token_lengths))
+    #     largest_chunk = chunks[max_index]
+    #     largest_tokens = token_lengths[max_index]
+    # else:
+    #     largest_chunk = ""
+    #     largest_tokens = 0
 
-    list_of_dicts.append({
-        "filename": doc_title,
-        "chunks": chunks,
-        "token_lengths": token_lengths,
-        "largest": {
-            "tokens": largest_tokens,
-            "text": largest_chunk
-        }
-    })
+    # list_of_dicts.append({
+    #     "filename": doc_title,
+    #     "chunks": chunks,
+    #     "token_lengths": token_lengths,
+    #     "largest": {
+    #         "tokens": largest_tokens,
+    #         "text": largest_chunk
+    #     }
+    # })
+
+    #save this for logging purposes to mongo once we get it
+    #list_of_dicts
 
 
     ###
@@ -413,9 +419,21 @@ def scrape_rfp(uploaded_file):
                 }
                 for j, e in enumerate(response.data)
             ]
-    
+    # index.delete(delete_all=True, namespace=doc_title+"-embeddings")
+
+    # while True:
+    #     stats = index.describe_index_stats()
+    #     ns_stats = stats['namespaces'].get(doc_title+"-embeddings", {})
+    #     vector_count = ns_stats.get('vector_count', 0)
+
+    #     if vector_count == 0:
+    #         print("Deletion complete.")
+    #         break
+
+    #     print(f"Waiting for deletion... {vector_count} vectors remain.")
+    #     time.sleep(2)
+
     index.upsert(vectors=embeddings, namespace=doc_title+"-embeddings")
 
-    #save this for logging purposes to mongo once we get it
-    #list_of_dicts
+
     return doc_title+"-embeddings"
