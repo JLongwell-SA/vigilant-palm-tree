@@ -27,9 +27,9 @@ with input_container:
 # --- Process new query ---
 if user_query:
     with st.spinner("Embedding and searching..."):
-        result = encode_search_rerank(user_query, top_k, top_n=top_k, alpha = 0.75)
+        result = encode_search_rerank(user_query,  "", "", top_k, top_n=top_k, alpha = 0.75)
         st.session_state.search_query = user_query
-        st.session_state.search_results = result
+        st.session_state.search_results = result[0]
         st.session_state.top_k = top_k
         st.session_state.top_n = top_k
 

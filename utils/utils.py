@@ -69,7 +69,7 @@ def hybrid_score_norm(dense, sparse, alpha: float):
     
     return [v * alpha for v in dense], hs
 # improve the pipeline with a re-ranker cutoff value/token limit to the amount of chunks we use for context in the final decoder
-def encode_search_rerank(user_query, top_k=20, top_n=40, alpha=0.75):
+def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, alpha=0.75):
     # Embed the query using OpenAI
 
     embedding_response = client.embeddings.create(
@@ -91,7 +91,6 @@ def encode_search_rerank(user_query, top_k=20, top_n=40, alpha=0.75):
         include_metadata=True
     )
 
-    
 
 
     # print(query_response.matches)
@@ -118,7 +117,45 @@ def encode_search_rerank(user_query, top_k=20, top_n=40, alpha=0.75):
         parameters={"truncate": "END"}
     )
 
-    return result
+
+    if (summary != "") and (name_space != ""):
+
+        rfp_response = hybrid_index.query(
+            namespace=name_space,
+            top_k=top_k,
+            vector=hdense,
+            sparse_vector=hsparse,
+            include_values=True,
+            include_metadata=True
+        )
+
+        rfp_chunks_to_rerank = [
+                {
+                    "id": match.id,  
+                    "text": match.metadata["chunk"],
+                    "metadata": match.metadata
+                }
+                for match in rfp_response.matches
+                if "chunk" in match.metadata
+
+            ]
+        
+        rfp_result = pc.inference.rerank(
+            model="bge-reranker-v2-m3", # hopefully change this to cohere re-rank, currently at 1024 input token max
+            query=user_query,
+            documents=rfp_chunks_to_rerank,
+            rank_fields=["text"],
+            top_n=top_n,
+            return_documents=True,
+            parameters={"truncate": "END"}
+        )
+
+        return [result, rfp_result]
+    
+    return [result]
+
+def summarize_rfp():
+    return ""
 
 def count_tokens(text, model="text-embedding-3-small"):
     enc = tiktoken.encoding_for_model(model)
@@ -381,4 +418,4 @@ def scrape_rfp(uploaded_file):
 
     #save this for logging purposes to mongo once we get it
     #list_of_dicts
-    return
+    return doc_title+"-embeddings"
