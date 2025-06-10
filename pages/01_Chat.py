@@ -1,6 +1,6 @@
 import streamlit as st
-from utils.utils import encode_search_rerank, scrape_rfp, client, summarize_rfp
-from utils.prompts import NO_DOC_PROMPT, DOC_PROMPT
+from utils.utils import encode_search_rerank, scrape_rfp, client, process_rfp
+from utils.prompts import NO_DOC_PROMPT, DOC_PROMPT, SUM_PROMPT
 # Streamlit Page Config
 st.set_page_config(page_title="Proposal Chat", layout="wide")
 
@@ -17,31 +17,20 @@ if "namespace" not in st.session_state:
 if "doc_title" not in st.session_state:
     st.session_state.doc_title = ""
 
+with st.sidebar:
+    # New Chat button
+    if st.button("🆕 New Chat"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
+
 st.write("Please upload the RFP you need assistance with. Be sure to first convert the RFP from PDF to Word using Bluebeam.")
 with st.expander("PDF to Word conversion instructions"):
         st.write("Step 1: Open your RFP using Bluebeam")
         st.write("Step 2: Click file > Export > Word Document > Entire Document")
         st.write("Step 3: Drag and drop the exported Word doc below")
-uploaded_file = st.file_uploader(" 📄 Word Document Uploader (.docx)", type="docx")
 
-if (uploaded_file is not None) and (st.session_state.summary == "") :
-    with st.spinner("Procesing..."):
-    # calls function from utils that scrapes RFP -> chunks it -> stores it in its own namespace, returning name of the uploaded doc to use as namespace.
-        st.session_state.doc_title = scrape_rfp(uploaded_file)
-        print(st.session_state.doc_title)
-        st.session_state.namespace = st.session_state.doc_title + "-embeddings"
-    with st.spinner("Summarizing..."):
-        st.session_state.summary = summarize_rfp(uploaded_file)
-        print(st.session_state.summary)
-
-with st.sidebar:
-    # New Chat button
-    if st.button("🆕 New Chat"):
-        st.session_state.messages = []
-        st.session_state.summary = ""
-        st.session_state.namespace = ""
-        st.session_state.doc_title = ""
-        st.rerun()
+uploaded_file = st.file_uploader(" 📄 Word Document Uploader (.docx)", type="docx", key = "doc_uploader")
 
 # Display chat messages
 for msg_idx, msg in enumerate(st.session_state.messages):
@@ -85,6 +74,8 @@ for msg_idx, msg in enumerate(st.session_state.messages):
                         # Add a subtle divider
                         if i < len(msg["context"]) - 1:
                             st.divider()
+
+
 
 # Chat input
 user_input = st.chat_input("Ask something about your engineering proposals...")
@@ -150,8 +141,6 @@ if user_input:
                 final_prompt = DOC_PROMPT + "## <SUMMARY>\n" + st.session_state.summary + "\n## </SUMMARY>\n\n## <RFP>\n" + rfp_prompt + "\n## </RFP>\n\n## <PROPOSAL>\n" + proposals_prompt +  "\n## </PROPOSAL>\n\n## </CONTEXT>\n\n## <User Query>\n" 
 
 
-            print("This is the final prompt", final_prompt)
-
             response = client.chat.completions.create(
                 model="gpt-4.1-2025-04-14",
                 messages=[
@@ -174,12 +163,11 @@ if user_input:
                 placeholder = st.empty()
                 for chunk in response:
                     delta = chunk.choices[0].delta.content or ""
-                    full_response += delta
+                    escaped_delta = delta.replace('$', '\\$')
+                    full_response += escaped_delta
                     placeholder.markdown(f"{full_response}▌")
                 placeholder.markdown(full_response)
 
-                ## Look for $ post process and make them good
-                
                 # Change these to redirect to another page? or wipe whats there or something
                 # Add collapsible context display for current response. 
                 # make another of these for the rfp retreived context
@@ -217,4 +205,50 @@ if user_input:
                 "role": "assistant",
                 "content": full_response.strip(),
                 "context": result[0].data  # Store the context data
+            })
+
+
+
+if (uploaded_file is not None) and (st.session_state.summary == "") :
+    with st.spinner("Procesing..."):
+    # calls function from utils that scrapes RFP -> chunks it -> stores it in its own namespace, returning name of the uploaded doc to use as namespace.
+        st.session_state.namespace = scrape_rfp(uploaded_file)
+        print(st.session_state.namespace)
+        st.session_state.doc_title = st.session_state.namespace.split("-embeddings")[0]
+    with st.spinner("Summarizing..."):
+        full_text = process_rfp(uploaded_file)
+        print(st.session_state.summary)
+        summary_response = client.chat.completions.create(
+            model ="gpt-4.1-2025-04-14",
+            messages = [
+
+                {
+                    "role": "system",
+                    "content": SUM_PROMPT
+                },
+                {
+                    "role": "user",
+                    "content": "Here is the RFP document " + full_text
+                } 
+            ],
+            temperature=1,
+            top_p=1,
+            stream=True
+        )
+        # Stream assistant reply
+        full_summary = ""
+        with st.chat_message("assistant"):
+            placeholder = st.empty()
+            for chunk in summary_response:
+                delta = chunk.choices[0].delta.content or ""
+                escaped_delta = delta.replace('$', '\\$')
+
+                full_summary += escaped_delta
+                placeholder.markdown(f"{full_summary}▌")
+            placeholder.markdown(full_summary)
+
+        st.session_state.summary = full_summary
+        st.session_state.messages.append({
+                "role": "assistant",
+                "content": full_summary.strip()
             })

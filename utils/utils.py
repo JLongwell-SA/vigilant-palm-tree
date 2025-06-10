@@ -14,7 +14,7 @@ from docx.oxml.text.paragraph import CT_P
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 import time
-from utils.prompts import SUM_PROMPT
+from datetime import datetime
 
 API_KEY = st.secrets["API_KEY"]
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
@@ -116,9 +116,7 @@ def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, al
         return_documents=True,
         parameters={"truncate": "END"}
     )
-
-    print("This is the summary", summary)
-    print("This is the name_space", name_space)
+    
     if (summary != "") and (name_space != ""):
 
         rfp_response = hybrid_index.query(
@@ -363,40 +361,8 @@ def extract_section_chunks(doc, doc_title):
 def scrape_rfp(uploaded_file):
     doc = Document(uploaded_file)
     doc_title = os.path.splitext(uploaded_file.name)[0]
-
     chunks = extract_section_chunks(doc, doc_title)
-    # # Print for testing
-    # for i, chunk in enumerate(chunks, 1):
-    #     print(f"\n--- Section {i} ---\n{chunk}\n")
 
-    # list_of_dicts = []
-    # token_lengths = [count_tokens(chunk) for chunk in chunks]
-
-    # if token_lengths:
-    #     max_index = token_lengths.index(max(token_lengths))
-    #     largest_chunk = chunks[max_index]
-    #     largest_tokens = token_lengths[max_index]
-    # else:
-    #     largest_chunk = ""
-    #     largest_tokens = 0
-
-    # list_of_dicts.append({
-    #     "filename": doc_title,
-    #     "chunks": chunks,
-    #     "token_lengths": token_lengths,
-    #     "largest": {
-    #         "tokens": largest_tokens,
-    #         "text": largest_chunk
-    #     }
-    # })
-
-    #save this for logging purposes to mongo once we get it
-    #list_of_dicts
-
-
-    ###
-    ### write some retry logic here to avoid rate limit failures
-    ###
     response = client.embeddings.create(
             input=chunks,
             model="text-embedding-3-large"
@@ -417,23 +383,25 @@ def scrape_rfp(uploaded_file):
                 }
                 for j, e in enumerate(response.data)
             ]
-    index.delete(delete_all=True, namespace=doc_title+"-embeddings")
 
-    while True:
-        stats = index.describe_index_stats()
-        ns_stats = stats['namespaces'].get(doc_title+"-embeddings", {})
-        vector_count = ns_stats.get('vector_count', 0)
+    timestamp = datetime.now().strftime("%Y%m%dT%H%M%S%f")
+    namespace = doc_title+"-embeddings"+str(timestamp)
 
-        if vector_count == 0:
-            print("Deletion complete.")
-            break
-
-        print(f"Waiting for deletion... {vector_count} vectors remain.")
-        time.sleep(2)
-
-    index.upsert(vectors=embeddings, namespace=doc_title+"-embeddings")
-
-    return doc_title
+    stats = index.describe_index_stats()
+    namespaces = list(stats.get("namespaces", {}).keys())
+    # print("Total namespaces:", len(namespaces))
+    # print("Namespaces:", namespaces)
+    if len(namespaces) >= 100:
+        namespaces.remove('proposal-embeddings')
+        print("Number of namespaces is 100 or more. Deleting oldest.")
+        candidate_namespaces = [i[-20:] for i in namespaces]
+        sorted_list = sorted(candidate_namespaces, key=lambda x: datetime.strptime(x, "%Y%m%dT%H%M%S%f"))
+        oldest_namespace = next(ns for ns in namespaces if ns.endswith(sorted_list[0]))
+        # print(oldest_namespace)
+        index.delete(delete_all=True, namespace=oldest_namespace)
+        print("Deleted namespace:", oldest_namespace)
+    index.upsert(vectors=embeddings, namespace=namespace)
+    return namespace
 
 def extract_paragraphs_and_tables(doc):
     elements = []
@@ -473,7 +441,7 @@ def format_table_as_markdown(table_data):
 
     return md
 
-def summarize_rfp(uploaded_file):
+def process_rfp(uploaded_file):
     doc = Document(uploaded_file)
     
     # Extract content
@@ -487,23 +455,4 @@ def summarize_rfp(uploaded_file):
         else:
             final_text += format_table_as_markdown(el) + "\n\n"
 
-
-    # make an API call where we pass in the doc + a query requestion for a summary
-    response = client.responses.create(
-        model ="gpt-4.1-2025-04-14",
-        input = [
-
-            {
-                "role": "system",
-                "content": SUM_PROMPT
-            },
-            {
-                "role": "user",
-                "content": "Here is the RFP document " + final_text
-            } 
-        ],
-        temperature=1,
-        top_p=1
-    )
-
-    return response.output_text
+    return final_text
