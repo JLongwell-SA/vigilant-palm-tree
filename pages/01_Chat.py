@@ -16,6 +16,8 @@ if "namespace" not in st.session_state:
     st.session_state.namespace = ""
 if "doc_title" not in st.session_state:
     st.session_state.doc_title = ""
+if "rolling_history" not in st.session_state:
+    st.session_state.rolling_history = []
 
 with st.sidebar:
     # New Chat button
@@ -140,19 +142,13 @@ if user_input:
 
                 final_prompt = DOC_PROMPT + "## <SUMMARY>\n" + st.session_state.summary + "\n## </SUMMARY>\n\n## <RFP>\n" + rfp_prompt + "\n## </RFP>\n\n## <PROPOSAL>\n" + proposals_prompt +  "\n## </PROPOSAL>\n\n## </CONTEXT>\n\n## <User Query>\n" 
 
-
-            response = client.chat.completions.create(
+            #Update the rolling history in the session state, then pass it to the api
+            st.session_state.rolling_history.extend([{"role": "system", "content":f"{final_prompt}"},{"role": "user", "content": user_input + "\n</User Query>\n"}])
+            print("This is the rolling history:", st.session_state.rolling_history)
+            response = client.responses.create(
                 model="gpt-4.1-2025-04-14",
-                messages=[
-                    {"role": "system",
-                     "content": final_prompt
-                    },
-                    {"role": "user",
-                     "content": user_input + "\n</User Query>\n"
-                    }    
-                ],
+                input = st.session_state.rolling_history,
                 temperature=1,
-                max_tokens=8192,
                 top_p=1,
                 stream=True
             )
@@ -162,10 +158,12 @@ if user_input:
             with st.chat_message("assistant"):
                 placeholder = st.empty()
                 for chunk in response:
-                    delta = chunk.choices[0].delta.content or ""
-                    escaped_delta = delta.replace('$', '\\$')
-                    full_response += escaped_delta
-                    placeholder.markdown(f"{full_response}▌")
+                    if hasattr(chunk, 'type') and chunk.type == 'response.output_text.delta':
+                        if hasattr(chunk, 'delta') and chunk.delta:
+                            delta = chunk.delta
+                            escaped_delta = delta.replace('$', '\\$')
+                            full_response += escaped_delta
+                            placeholder.markdown(f"{full_response}▌")
                 placeholder.markdown(full_response)
 
                 # Change these to redirect to another page? or wipe whats there or something
@@ -200,6 +198,7 @@ if user_input:
                             if i < len(result[0].data) - 1:
                                 st.divider()
 
+            st.session_state.rolling_history.append({"role": "assistant", "content": full_response})
             # Save to chat history WITH context data
             st.session_state.messages.append({
                 "role": "assistant",
@@ -209,27 +208,20 @@ if user_input:
 
 
 
-if (uploaded_file is not None) and (st.session_state.summary == "") :
+if (uploaded_file is not None) and (st.session_state.summary == ""):
     with st.spinner("Procesing..."):
     # calls function from utils that scrapes RFP -> chunks it -> stores it in its own namespace, returning name of the uploaded doc to use as namespace.
         st.session_state.namespace = process_rfp_vectors(uploaded_file)
-        print(st.session_state.namespace)
+        # print(st.session_state.namespace)
         st.session_state.doc_title = st.session_state.namespace.split("-embeddings")[0]
     with st.spinner("Summarizing..."):
         full_text = process_rfp_text(uploaded_file)
-        print(st.session_state.summary)
-        summary_response = client.chat.completions.create(
+        # print(st.session_state.summary)
+        summary_response = client.responses.create(
             model ="gpt-4.1-2025-04-14",
-            messages = [
-
-                {
-                    "role": "system",
-                    "content": SUM_PROMPT
-                },
-                {
-                    "role": "user",
-                    "content": "Here is the RFP document " + full_text
-                } 
+            input = [
+                {"role": "system", "content":f"{SUM_PROMPT}"},
+                {"role": "user", "content": "Here is the RFP document " + full_text}
             ],
             temperature=1,
             top_p=1,
@@ -240,11 +232,12 @@ if (uploaded_file is not None) and (st.session_state.summary == "") :
         with st.chat_message("assistant"):
             placeholder = st.empty()
             for chunk in summary_response:
-                delta = chunk.choices[0].delta.content or ""
-                escaped_delta = delta.replace('$', '\\$')
-
-                full_summary += escaped_delta
-                placeholder.markdown(f"{full_summary}▌")
+                if hasattr(chunk, 'type') and chunk.type == 'response.output_text.delta':
+                    if hasattr(chunk, 'delta') and chunk.delta:
+                        delta = chunk.delta
+                        escaped_delta = delta.replace('$', '\\$')
+                        full_summary += escaped_delta
+                        placeholder.markdown(f"{full_summary}▌")    
             placeholder.markdown(full_summary)
 
         st.session_state.summary = full_summary
