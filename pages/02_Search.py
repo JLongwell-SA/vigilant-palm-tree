@@ -21,17 +21,17 @@ result_container = st.container()
 
 with input_container:
     user_query = st.chat_input("Enter your search query:")
-    top_k = st.slider("Number of results", 1, 20, st.session_state.top_k)
-
+    top_n = st.slider("Number of results", 1, 20, st.session_state.top_n)
+    st.markdown("---")
 
 # --- Process new query ---
 if user_query:
     with st.spinner("Embedding and searching..."):
-        result = encode_search_rerank(user_query,  "", "", top_k, top_n=top_k, alpha = 0.75)
+        result = encode_search_rerank(user_query,  "", "", top_k=50, top_n=top_n, alpha = 0.75)
         st.session_state.search_query = user_query
         st.session_state.search_results = result[0]
-        st.session_state.top_k = top_k
-        st.session_state.top_n = top_k
+        st.session_state.top_k = 50
+        st.session_state.top_n = top_n
 
 # --- Show results from session ---
 if st.session_state.search_results:

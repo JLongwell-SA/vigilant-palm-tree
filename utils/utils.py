@@ -172,7 +172,7 @@ def trim_history(history, max_tokens=15000):
     while total_tokens > max_tokens and len(history) > 1:
         history.pop(0)
         total_tokens = count_tokens_GPT(history)
-
+    print(total_tokens)
     return history
 
 def new_line_regex(text):

@@ -33,6 +33,7 @@ with st.expander("PDF to Word conversion instructions"):
         st.write("Step 3: Drag and drop the exported Word doc below")
 
 uploaded_file = st.file_uploader(" 📄 Word Document Uploader (.docx)", type="docx", key = "doc_uploader")
+st.markdown("---")
 
 # Display chat messages
 for msg_idx, msg in enumerate(st.session_state.messages):
