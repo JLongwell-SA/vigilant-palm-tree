@@ -15,6 +15,7 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 import time
 from datetime import datetime
+import tiktoken
 
 API_KEY = st.secrets["API_KEY"]
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
@@ -35,6 +36,7 @@ index_name = "hybrid-index"
 hybrid_index = pc.Index(index_name)
 bm25 = BM25Encoder()
 bm25.load(f"bm25_params.json")
+encoding = tiktoken.get_encoding("o200k_base")  # or your model name
 
 if not pc.has_index(index_name):
     pc.create_index(
@@ -159,6 +161,19 @@ def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, al
 def count_tokens(text, model="text-embedding-3-large"):
     enc = tiktoken.encoding_for_model(model)
     return len(enc.encode(text))
+
+def count_tokens_GPT(messages):
+    return sum(len(encoding.encode(msg["content"])) for msg in messages)
+
+def trim_history(history, max_tokens=15000):
+    total_tokens = count_tokens_GPT(history)
+    
+    # Trim oldest messages until under the limit
+    while total_tokens > max_tokens and len(history) > 1:
+        history.pop(0)
+        total_tokens = count_tokens_GPT(history)
+
+    return history
 
 def new_line_regex(text):
     return re.sub(r'(?:\s*\n){4,}', '\n', text)

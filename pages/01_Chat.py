@@ -1,5 +1,5 @@
 import streamlit as st
-from utils.utils import encode_search_rerank, process_rfp_vectors, client, process_rfp_text
+from utils.utils import encode_search_rerank, process_rfp_vectors, client, process_rfp_text, trim_history
 from utils.prompts import NO_DOC_PROMPT, DOC_PROMPT, SUM_PROMPT
 # Streamlit Page Config
 st.set_page_config(page_title="Proposal Chat", layout="wide")
@@ -199,6 +199,8 @@ if user_input:
                                 st.divider()
 
             st.session_state.rolling_history.append({"role": "assistant", "content": full_response})
+            st.session_state.rolling_history = trim_history(st.session_state.rolling_history)
+
             # Save to chat history WITH context data
             st.session_state.messages.append({
                 "role": "assistant",
