@@ -358,11 +358,11 @@ def extract_section_chunks(doc, doc_title):
 
     return section_chunks
 
-def scrape_rfp(uploaded_file):
+def process_rfp_vectors(uploaded_file):
     doc = Document(uploaded_file)
     doc_title = os.path.splitext(uploaded_file.name)[0]
     chunks = extract_section_chunks(doc, doc_title)
-
+    #Write some retry logic incase the document is super long and the chunks are super big and we get rate limited
     response = client.embeddings.create(
             input=chunks,
             model="text-embedding-3-large"
@@ -391,7 +391,7 @@ def scrape_rfp(uploaded_file):
     namespaces = list(stats.get("namespaces", {}).keys())
     # print("Total namespaces:", len(namespaces))
     # print("Namespaces:", namespaces)
-    if len(namespaces) >= 100:
+    if len(namespaces) >= 95:
         namespaces.remove('proposal-embeddings')
         print("Number of namespaces is 100 or more. Deleting oldest.")
         candidate_namespaces = [i[-20:] for i in namespaces]
@@ -400,6 +400,8 @@ def scrape_rfp(uploaded_file):
         # print(oldest_namespace)
         index.delete(delete_all=True, namespace=oldest_namespace)
         print("Deleted namespace:", oldest_namespace)
+
+    #We may need some retry logic here if the docs are super big and we cant upsert all the vectors at once
     index.upsert(vectors=embeddings, namespace=namespace)
     return namespace
 
@@ -441,7 +443,7 @@ def format_table_as_markdown(table_data):
 
     return md
 
-def process_rfp(uploaded_file):
+def process_rfp_text(uploaded_file):
     doc = Document(uploaded_file)
     
     # Extract content

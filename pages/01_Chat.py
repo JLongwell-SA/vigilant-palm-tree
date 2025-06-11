@@ -1,5 +1,5 @@
 import streamlit as st
-from utils.utils import encode_search_rerank, scrape_rfp, client, process_rfp
+from utils.utils import encode_search_rerank, process_rfp_vectors, client, process_rfp_text
 from utils.prompts import NO_DOC_PROMPT, DOC_PROMPT, SUM_PROMPT
 # Streamlit Page Config
 st.set_page_config(page_title="Proposal Chat", layout="wide")
@@ -89,7 +89,7 @@ if user_input:
     with st.spinner("Searching relevant proposal content..."):
 
         result = encode_search_rerank(user_input, st.session_state.summary, st.session_state.namespace, top_k=5, top_n=5, alpha=0.75)
-        print("This is the len of the result", len(result))
+        # print("This is the len of the result", len(result))
         st.session_state.len_res = len(result)
         if not result[0].data:
             full_response = "🤔 I couldn't find anything relevant."
@@ -171,34 +171,34 @@ if user_input:
                 # Change these to redirect to another page? or wipe whats there or something
                 # Add collapsible context display for current response. 
                 # make another of these for the rfp retreived context
-                # with st.expander("📄 View Retrieved Context Chunks", expanded=False):
-                #     context_container = st.container()
+                with st.expander("📄 View Retrieved Context Chunks", expanded=False):
+                    context_container = st.container()
                     
-                #     with context_container:
-                #         for i, match in enumerate(result[0].data):
-                #             doc = match['document']
-                #             doc_id = doc['id']
-                #             metadata = doc.get('metadata', {})
+                    with context_container:
+                        for i, match in enumerate(result[0].data):
+                            doc = match['document']
+                            doc_id = doc['id']
+                            metadata = doc.get('metadata', {})
 
-                #             chunk_no = doc_id.split("_")[-1]
-                #             og_document_title = "_".join(doc_id.split("_")[:-1])
-                #             chunk_text = metadata.get("chunk", "[No chunk text available]")
+                            chunk_no = doc_id.split("_")[-1]
+                            og_document_title = "_".join(doc_id.split("_")[:-1])
+                            chunk_text = metadata.get("chunk", "[No chunk text available]")
 
-                #             # Use columns for better layout
-                #             col1, col2 = st.columns([1, 3])
+                            # Use columns for better layout
+                            col1, col2 = st.columns([1, 3])
                             
-                #             with col1:
-                #                 st.markdown(f"**📘 Result {i+1}**")
-                #                 st.markdown(f"Score: `{match['score']:.4f}`")
-                #                 st.markdown(f"Doc: `{og_document_title}`")
-                #                 st.markdown(f"Chunk: `{chunk_no}`")
+                            with col1:
+                                st.markdown(f"**📘 Result {i+1}**")
+                                st.markdown(f"Score: `{match['score']:.4f}`")
+                                st.markdown(f"Doc: `{og_document_title}`")
+                                st.markdown(f"Chunk: `{chunk_no}`")
                             
-                #             with col2:
-                #                 st.markdown("**Content:**")
-                #                 st.markdown(chunk_text)
+                            with col2:
+                                st.markdown("**Content:**")
+                                st.markdown(chunk_text)
                             
-                #             if i < len(result[0].data) - 1:
-                #                 st.divider()
+                            if i < len(result[0].data) - 1:
+                                st.divider()
 
             # Save to chat history WITH context data
             st.session_state.messages.append({
@@ -212,11 +212,11 @@ if user_input:
 if (uploaded_file is not None) and (st.session_state.summary == "") :
     with st.spinner("Procesing..."):
     # calls function from utils that scrapes RFP -> chunks it -> stores it in its own namespace, returning name of the uploaded doc to use as namespace.
-        st.session_state.namespace = scrape_rfp(uploaded_file)
+        st.session_state.namespace = process_rfp_vectors(uploaded_file)
         print(st.session_state.namespace)
         st.session_state.doc_title = st.session_state.namespace.split("-embeddings")[0]
     with st.spinner("Summarizing..."):
-        full_text = process_rfp(uploaded_file)
+        full_text = process_rfp_text(uploaded_file)
         print(st.session_state.summary)
         summary_response = client.chat.completions.create(
             model ="gpt-4.1-2025-04-14",
@@ -250,5 +250,31 @@ if (uploaded_file is not None) and (st.session_state.summary == "") :
         st.session_state.summary = full_summary
         st.session_state.messages.append({
                 "role": "assistant",
-                "content": full_summary.strip()
+                "content": full_summary.strip(),
+                "key": "summary"
             })
+        print("This is the length of messages",len(st.session_state.messages))
+
+with st.sidebar:
+    #check if st.session_state.summary is not empty string
+    if st.session_state.summary != "":
+        
+        if st.button("✏️ Edit Summary"):
+            st.session_state.show_edit_popup = True
+            # Show the text area in a simulated popup (expander)
+            print(st.session_state.get("show_edit_popup", False))
+        
+        if st.session_state.get("show_edit_popup", False):
+            # with st.expander("📝 Edit Model Summary", expanded=True):
+            edited_summary = st.text_area("Edit below:", value=st.session_state.summary, height=300, key="summary_edit")
+            if st.button("✅ Save Changes"):
+                st.session_state.summary = edited_summary
+                for i, message in enumerate(st.session_state.messages):
+                    if message.get("key") == "summary":
+                        st.session_state.messages[i]["content"] = edited_summary.strip()
+                        break
+
+                #edit the st.session_state.messages that has "key": "summary"
+                st.success("Summary updated!")
+                st.session_state.show_edit_popup = False
+                st.rerun()
