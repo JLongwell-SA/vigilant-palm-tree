@@ -13,7 +13,10 @@ if "search_query" not in st.session_state:
 if "search_results" not in st.session_state:
     st.session_state.search_results = None
 if "top_k" not in st.session_state:
-    st.session_state.top_k = 5
+    st.session_state.top_k = 50
+
+if "top_n" not in st.session_state:
+    st.session_state.top_n = 5
 
 # Separate the input area
 input_container = st.container()
