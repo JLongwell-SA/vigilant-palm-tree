@@ -2,8 +2,8 @@ import streamlit as st
 from openai import OpenAI
 from pinecone import Pinecone, ServerlessSpec
 from pinecone.grpc import PineconeGRPC as Pinecone
-import streamlit_authenticator as stauth
-from pymongo import MongoClient
+# import streamlit_authenticator as stauth
+# from pymongo import MongoClient
 from pinecone_text.sparse import BM25Encoder
 import os
 import re
@@ -13,10 +13,11 @@ from docx.oxml.table import CT_Tbl
 from docx.oxml.text.paragraph import CT_P
 from docx.table import Table
 from docx.text.paragraph import Paragraph
-import time
+# import time
 from datetime import datetime
 import tiktoken
-
+from utils.prompts import REFORMULATE_WITH_RFP, REFORMULATE
+import json
 API_KEY = st.secrets["API_KEY"]
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
 # MONGODB_KEY = st.secrets["MONGODB_KEY"]
@@ -72,40 +73,66 @@ def hybrid_score_norm(dense, sparse, alpha: float):
     return [v * alpha for v in dense], hs
 
 # improve the pipeline with a re-ranker cutoff value/token limit to the amount of chunks we use for context in the final decoder
-def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, alpha=0.75):
+def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, alpha=0.75, comes_from_chat=True):
+    
+    #only run this if we know it comes from chat instead of search
+    #
+    #prompt changes based on if we have a summary that isn't an empty string
+    #
+    if comes_from_chat:
+
+        prompt = REFORMULATE_WITH_RFP + user_query if summary != "" else REFORMULATE + user_query
+
+        #Make an llm call to reformulate the user's query
+        reformulated_response = client.responses.create(
+                    model="gpt-4.1-2025-04-14",
+                    input = prompt,
+                    temperature=0,
+                    top_p=0.25
+        )
+
+        print(reformulated_response.output[0].content[0].text)
+        reformulated_json = json.loads(reformulated_response.output[0].content[0].text)
+        #get the proposal queries
+        proposal_queries = [item["query"] for item in reformulated_json if item["database"] == "proposals"]
+
+
+    # Loop through this for each proposal query
+    documents_to_rerank = []
+    for query in proposal_queries if comes_from_chat else [user_query]:
     # Embed the query using OpenAI
     # write some retry logic here incase we get rate limits
+        embedding_response = client.embeddings.create(
+            model="text-embedding-3-large",
+            input=query
+        )
 
-    embedding_response = client.embeddings.create(
-        model="text-embedding-3-large",
-        input=user_query
-    )
+        sparse_query_embedding = bm25.encode_documents(query)
 
-    sparse_query_embedding = bm25.encode_documents(user_query)
-
-    hdense, hsparse = hybrid_score_norm(embedding_response.data[0].embedding, sparse_query_embedding, alpha)
+        hdense, hsparse = hybrid_score_norm(embedding_response.data[0].embedding, sparse_query_embedding, alpha)
 
 
-    query_response = hybrid_index.query(
-        namespace="proposal-embeddings",
-        top_k=top_k,
-        vector=hdense,
-        sparse_vector=hsparse,
-        include_values=True,
-        include_metadata=True
-    )
+        query_response = hybrid_index.query(
+            namespace="proposal-embeddings",
+            top_k=top_k,
+            vector=hdense,
+            sparse_vector=hsparse,
+            include_values=True,
+            include_metadata=True
+        )
 
-    # print(query_response.matches)
+        # print(query_response.matches)
 
-    documents_to_rerank = [
-        {
-            "id": match.id,  
-            "text": match.metadata["chunk"],
-            "metadata": match.metadata
-        }
-        for match in query_response.matches
-        if "chunk" in match.metadata
-    ]
+        documents_to_rerank.extend([
+            {
+                "id": match.id,  
+                "text": match.metadata["chunk"],
+                "metadata": match.metadata
+            }
+            for match in query_response.matches
+            if "chunk" in match.metadata
+        ]
+        )
 
     # setup microsoft azure account and change this to query cohere re-rank api
     # write some retry logic here incase we get rate limits
@@ -120,26 +147,41 @@ def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, al
     )
     
     if (summary != "") and (name_space != ""):
+        #get the rfp queries
+        rfp_queries = [item["query"] for item in reformulated_json if item["database"] == "RFP"]
 
-        rfp_response = hybrid_index.query(
-            namespace=name_space,
-            top_k=top_k,
-            vector=hdense,
-            sparse_vector=hsparse,
-            include_values=True,
-            include_metadata=True
-        )
+        rfp_chunks_to_rerank = []
 
-        rfp_chunks_to_rerank = [
-                {
-                    "id": match.id,  
-                    "text": match.metadata["chunk"],
-                    "metadata": match.metadata
-                }
-                for match in rfp_response.matches
-                if "chunk" in match.metadata
+        for query in rfp_queries:
+            embedding_response = client.embeddings.create(
+                model="text-embedding-3-large",
+                input=query
+            )
 
-            ]
+            sparse_query_embedding = bm25.encode_documents(query)
+
+            hdense, hsparse = hybrid_score_norm(embedding_response.data[0].embedding, sparse_query_embedding, alpha)
+
+            rfp_response = hybrid_index.query(
+                namespace=name_space,
+                top_k=top_k,
+                vector=hdense,
+                sparse_vector=hsparse,
+                include_values=True,
+                include_metadata=True
+            )
+
+            rfp_chunks_to_rerank.extend([
+                    {
+                        "id": match.id,  
+                        "text": match.metadata["chunk"],
+                        "metadata": match.metadata
+                    }
+                    for match in rfp_response.matches
+                    if "chunk" in match.metadata
+
+                ]
+            )
         
         # setup microsoft azure account and change this to query cohere re-rank api
         # write some retry logic here incase we get rate limits
@@ -157,15 +199,15 @@ def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, al
     
     return [result]
 
-
+#clean these two up
 def count_tokens(text, model="text-embedding-3-large"):
     enc = tiktoken.encoding_for_model(model)
     return len(enc.encode(text))
-
+#clean these two up
 def count_tokens_GPT(messages):
     return sum(len(encoding.encode(msg["content"])) for msg in messages)
 
-def trim_history(history, max_tokens=15000):
+def trim_history(history, max_tokens=50000):
     total_tokens = count_tokens_GPT(history)
     
     # Trim oldest messages until under the limit

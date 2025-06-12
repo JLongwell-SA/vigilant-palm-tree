@@ -2,6 +2,7 @@
 import streamlit as st
 from utils.utils import encode_search_rerank
 
+st.set_page_config(page_title="Proposal Search", layout="wide")
 
 # st.page_link("Chat.py", label="💬 Go to Proposal Chat", icon="💬")
 
@@ -30,7 +31,7 @@ with input_container:
 # --- Process new query ---
 if user_query:
     with st.spinner("Embedding and searching..."):
-        result = encode_search_rerank(user_query,  "", "", top_k=50, top_n=top_n, alpha = 0.75)
+        result = encode_search_rerank(user_query,  "", "", top_k=50, top_n=top_n, alpha = 0.75, comes_from_chat=False)
         st.session_state.search_query = user_query
         st.session_state.search_results = result[0]
         st.session_state.top_k = 50

@@ -2,7 +2,7 @@ import streamlit as st
 from utils.utils import encode_search_rerank, process_rfp_vectors, client, process_rfp_text, trim_history
 from utils.prompts import NO_DOC_PROMPT, DOC_PROMPT, SUM_PROMPT
 # Streamlit Page Config
-st.set_page_config(page_title="Proposal Chat", layout="wide")
+st.set_page_config(layout="wide")
 
 
 st.title("📄💬 Proposal Chatbot")
@@ -81,7 +81,7 @@ for msg_idx, msg in enumerate(st.session_state.messages):
 
 
 # Chat input
-user_input = st.chat_input("Ask something about your engineering proposals...")
+user_input = st.chat_input("Ask something about your engineering proposals or new RFP...")
 
 if user_input:
     # Save user message
@@ -89,9 +89,9 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    with st.spinner("Searching relevant proposal content..."):
+    with st.spinner("Searching relevant content..."):
 
-        result = encode_search_rerank(user_input, st.session_state.summary, st.session_state.namespace, top_k=5, top_n=5, alpha=0.75)
+        result = encode_search_rerank(user_input, st.session_state.summary, st.session_state.namespace, top_k=50, top_n=10, alpha=0.75)
         # print("This is the len of the result", len(result))
         st.session_state.len_res = len(result)
         if not result[0].data:
@@ -145,12 +145,12 @@ if user_input:
 
             #Update the rolling history in the session state, then pass it to the api
             st.session_state.rolling_history.extend([{"role": "system", "content":f"{final_prompt}"},{"role": "user", "content": user_input + "\n</User Query>\n"}])
-            print("This is the rolling history:", st.session_state.rolling_history)
+            # print("This is the rolling history:", st.session_state.rolling_history)
             response = client.responses.create(
-                model="gpt-4.1-2025-04-14",
+                model="gpt-4.1-mini-2025-04-14", #"gpt-4.1-2025-04-14" change to this once we move to tier 3 or higher
                 input = st.session_state.rolling_history,
-                temperature=1,
-                top_p=1,
+                temperature=0,
+                top_p=0.25,
                 stream=True
             )
 
@@ -226,8 +226,8 @@ if (uploaded_file is not None) and (st.session_state.summary == ""):
                 {"role": "system", "content":f"{SUM_PROMPT}"},
                 {"role": "user", "content": "Here is the RFP document " + full_text}
             ],
-            temperature=1,
-            top_p=1,
+            temperature=0,
+            top_p=0.25,
             stream=True
         )
         # Stream assistant reply
@@ -258,7 +258,6 @@ with st.sidebar:
         if st.button("✏️ Edit Summary"):
             st.session_state.show_edit_popup = True
             # Show the text area in a simulated popup (expander)
-            print(st.session_state.get("show_edit_popup", False))
         
         if st.session_state.get("show_edit_popup", False):
             # with st.expander("📝 Edit Model Summary", expanded=True):

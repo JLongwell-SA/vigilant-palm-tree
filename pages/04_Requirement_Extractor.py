@@ -3,7 +3,7 @@
 import streamlit as st
 
 # Set page config
-st.set_page_config(page_title="Requirement_Extractor", layout="centered")
+st.set_page_config(page_title="Requirement_Extractor", layout="wide")
 
 # Sidebar
 # with st.sidebar:
