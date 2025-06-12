@@ -107,6 +107,8 @@ if user_input:
             
             proposals_prompt = f""
             for i, match in enumerate(result[0].data):
+                if match['score'] < 0.5:
+                    break
                 proposals_prompt += f"### Result {i+1} 📘 \n"
                 proposals_prompt += f"**Score:** `{match['score']:.4f}`\n"
                 doc = match['document']
@@ -129,6 +131,8 @@ if user_input:
             else:
                 rfp_prompt = f"**Original Document Title:** `{st.session_state.doc_title}`\n\n"
                 for i, match in enumerate(result[1].data):
+                    if match['score'] < 0.35:
+                        break
                     rfp_prompt += f"### Result {i+1} 📘 \n"
                     rfp_prompt += f"**Score:** `{match['score']:.4f}`\n"
                     metadata = doc.get('metadata', {})
@@ -145,6 +149,7 @@ if user_input:
 
             #Update the rolling history in the session state, then pass it to the api
             st.session_state.rolling_history.extend([{"role": "system", "content":f"{final_prompt}"},{"role": "user", "content": user_input + "\n</User Query>\n"}])
+            st.session_state.rolling_history = trim_history(st.session_state.rolling_history)
             # print("This is the rolling history:", st.session_state.rolling_history)
             response = client.responses.create(
                 model="gpt-4.1-mini-2025-04-14", #"gpt-4.1-2025-04-14" change to this once we move to tier 3 or higher
@@ -175,6 +180,8 @@ if user_input:
                     
                     with context_container:
                         for i, match in enumerate(result[0].data):
+                            if match['score'] < 0.5:
+                                break
                             doc = match['document']
                             doc_id = doc['id']
                             metadata = doc.get('metadata', {})
@@ -200,13 +207,14 @@ if user_input:
                                 st.divider()
 
             st.session_state.rolling_history.append({"role": "assistant", "content": full_response})
-            st.session_state.rolling_history = trim_history(st.session_state.rolling_history)
+            #Change this to make this at the start
+            filtered_context = [match for match in result[0].data if match.get('score', 0) >= 0.5]
 
             # Save to chat history WITH context data
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": full_response.strip(),
-                "context": result[0].data  # Store the context data
+                "context": filtered_context  # Store the context data
             })
 
 
