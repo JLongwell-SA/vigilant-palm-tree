@@ -18,6 +18,8 @@ from datetime import datetime
 import tiktoken
 from utils.prompts import REFORMULATE_WITH_RFP, REFORMULATE
 import json
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from openai import OpenAIError, RateLimitError, APIConnectionError, Timeout
 API_KEY = st.secrets["API_KEY"]
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
 # MONGODB_KEY = st.secrets["MONGODB_KEY"]
@@ -53,6 +55,28 @@ if not pc.has_index(index_name):
 
 index = pc.Index(index_name)
 
+# Define retry logic
+@retry(
+    reraise=True,
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=(
+        retry_if_exception_type(RateLimitError) |
+        retry_if_exception_type(APIConnectionError) |
+        retry_if_exception_type(Timeout) |
+        retry_if_exception_type(OpenAIError)
+    )
+)
+
+def call_llm_api(input, stream=True):
+    return client.responses.create(
+        model="gpt-4.1-2025-04-14",
+        input=input,
+        temperature=0,
+        top_p=0.25,
+        stream=stream
+    )
+
 def hybrid_score_norm(dense, sparse, alpha: float):
     """Hybrid score using a convex combination
 
@@ -84,12 +108,7 @@ def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, al
         prompt = REFORMULATE_WITH_RFP + user_query if summary != "" else REFORMULATE + user_query
 
         #Make an llm call to reformulate the user's query
-        reformulated_response = client.responses.create(
-                    model="gpt-4.1-2025-04-14",
-                    input = prompt,
-                    temperature=0,
-                    top_p=0.25
-        )
+        reformulated_response = call_llm_api(prompt, stream=False)
 
         print(reformulated_response.output[0].content[0].text)
         reformulated_json = json.loads(reformulated_response.output[0].content[0].text)
@@ -111,6 +130,7 @@ def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, al
 
         hdense, hsparse = hybrid_score_norm(embedding_response.data[0].embedding, sparse_query_embedding, alpha)
 
+        # write some retry logic here incase we get errors
 
         query_response = hybrid_index.query(
             namespace="proposal-embeddings",
@@ -153,6 +173,8 @@ def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, al
         rfp_chunks_to_rerank = []
 
         for query in rfp_queries:
+            # write some retry logic here incase we get rate limits
+
             embedding_response = client.embeddings.create(
                 model="text-embedding-3-large",
                 input=query
@@ -161,6 +183,7 @@ def encode_search_rerank(user_query, summary, name_space, top_k=20, top_n=40, al
             sparse_query_embedding = bm25.encode_documents(query)
 
             hdense, hsparse = hybrid_score_norm(embedding_response.data[0].embedding, sparse_query_embedding, alpha)
+            # write some retry logic here incase we get rate limits
 
             rfp_response = hybrid_index.query(
                 namespace=name_space,
@@ -515,3 +538,5 @@ def process_rfp_text(uploaded_file):
             final_text += format_table_as_markdown(el) + "\n\n"
 
     return final_text
+
+

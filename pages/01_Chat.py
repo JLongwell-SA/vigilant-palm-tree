@@ -1,9 +1,10 @@
 import streamlit as st
-from utils.utils import encode_search_rerank, process_rfp_vectors, client, process_rfp_text, trim_history
+from utils.utils import encode_search_rerank, process_rfp_vectors, client, process_rfp_text, trim_history, call_llm_api
 from utils.prompts import NO_DOC_PROMPT, DOC_PROMPT, SUM_PROMPT
+
+
 # Streamlit Page Config
 st.set_page_config(layout="wide")
-
 
 st.title("📄💬 Proposal Chatbot")
 
@@ -151,13 +152,13 @@ if user_input:
             st.session_state.rolling_history.extend([{"role": "system", "content":f"{final_prompt}"},{"role": "user", "content": user_input + "\n</User Query>\n"}])
             st.session_state.rolling_history = trim_history(st.session_state.rolling_history)
             # print("This is the rolling history:", st.session_state.rolling_history)
-            response = client.responses.create(
-                model="gpt-4.1-mini-2025-04-14", #"gpt-4.1-2025-04-14" change to this once we move to tier 3 or higher
-                input = st.session_state.rolling_history,
-                temperature=0,
-                top_p=0.25,
-                stream=True
-            )
+            try:
+                response = call_llm_api(st.session_state.rolling_history)
+            except Exception as e:
+                print("❌ API call failed after retries:", str(e))
+                st.error("❌ API call failed after retries, please try again later", icon="🚨")
+                st.stop()
+
 
             # Stream assistant reply
             full_response = ""
@@ -228,16 +229,18 @@ if (uploaded_file is not None) and (st.session_state.summary == ""):
     with st.spinner("Summarizing..."):
         full_text = process_rfp_text(uploaded_file)
         # print(st.session_state.summary)
-        summary_response = client.responses.create(
-            model ="gpt-4.1-2025-04-14",
-            input = [
-                {"role": "system", "content":f"{SUM_PROMPT}"},
-                {"role": "user", "content": "Here is the RFP document " + full_text}
-            ],
-            temperature=0,
-            top_p=0.25,
-            stream=True
-        )
+        try:
+            summary_response = call_llm_api(
+                [
+                    {"role": "system", "content":f"{SUM_PROMPT}"},
+                    {"role": "user", "content": "Here is the RFP document " + full_text}
+                ]
+            )
+        except Exception as e:
+                print("❌ API call failed after retries:", str(e))
+                st.error("❌ API call failed after retries, please try again later", icon="🚨")
+                st.stop()
+                
         # Stream assistant reply
         full_summary = ""
         with st.chat_message("assistant"):
